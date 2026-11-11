@@ -15,6 +15,9 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
       - run: pip install -e ".[content,dev]" -e ./agent
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - run: cd web && npm ci && npx tsc --noEmit && NODE_ENV=production npx next build
       - run: pytest -q
         env:
           NOUS_DRIVE_TEST_ADMIN_URL: postgresql://postgres:postgres@localhost:5432/postgres

@@ -8,7 +8,7 @@ from .embed import get_embedder, to_pgvector
 
 
 def search_content(conn: Connection, query: str, limit: int = 20, source_ids: list[str] | None = None,
-                   mode: str = "hybrid") -> list[dict]:
+                   mode: str = "hybrid", node_filter: tuple[str, dict] | None = None) -> list[dict]:
     """Return nodes ranked by relevance with the best-matching chunk as a snippet.
 
     ``mode``: 'keyword' (full text), 'semantic' (vectors) or 'hybrid' (reciprocal-rank fusion of both).
@@ -17,6 +17,9 @@ def search_content(conn: Connection, query: str, limit: int = 20, source_ids: li
     semantic: list[dict] = []
     src_filter = "AND c.source_id = ANY(%(sources)s)" if source_ids else ""
     params = {"q": query, "lim": limit * 4, "sources": source_ids}
+    if node_filter and node_filter[0]:
+        src_filter += " AND " + node_filter[0]  # conditions on n.* (folder, type, time) with named params
+        params.update(node_filter[1])
     if mode in ("keyword", "hybrid"):
         keyword = conn.execute(
             f"""SELECT c.id AS chunk_id, c.node_id, c.text,
@@ -39,6 +42,10 @@ def search_content(conn: Connection, query: str, limit: int = 20, source_ids: li
                 ORDER BY e.embedding <=> %(v)s::vector LIMIT %(lim)s""",
             dict(params, v=to_pgvector(vec), model=embedder.name),
         ).fetchall()
+        # Nearest neighbours always exist; keep only ones that are actually similar.
+        from ..config import get_settings
+        floor = get_settings().semantic_min_score
+        semantic = [r for r in semantic if (r["score"] or 0) >= floor]
     fused: dict[str, dict] = {}
     for lst in (keyword, semantic):
         for rank, r in enumerate(lst):

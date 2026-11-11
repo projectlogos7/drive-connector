@@ -84,6 +84,8 @@ class Settings:
     embedding_provider: str = field(default_factory=lambda: _env("EMBEDDING_PROVIDER", "fastembed"))
     embedding_model: str = field(default_factory=lambda: _env(
         "EMBEDDING_MODEL", "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"))
+    # Cosine similarity below which a "meaning" match is dropped (tune per embedding model).
+    semantic_min_score: float = field(default_factory=lambda: float(_env("SEMANTIC_MIN_SCORE", "0.3")))
     embedding_cache_dir: str | None = field(default_factory=lambda: _env("EMBEDDING_CACHE_DIR"))
     voyage_api_key: str | None = field(default_factory=lambda: os.environ.get("VOYAGE_API_KEY"))
     voyage_model: str = field(default_factory=lambda: _env("VOYAGE_MODEL", "voyage-3"))

@@ -76,9 +76,33 @@ def root() -> RedirectResponse:
     return RedirectResponse("/app")
 
 
-@app.get("/app", response_class=HTMLResponse, include_in_schema=False)
-def web_app() -> str:
-    return resources.files("nous_drive.api.static").joinpath("index.html").read_text()
+def _web_dir():
+    """The built Next.js app (web/out). NOUS_DRIVE_WEB_DIR overrides; packaged builds ship it in nous_drive/web."""
+    import os
+    from pathlib import Path
+    candidates = [os.environ.get("NOUS_DRIVE_WEB_DIR"),
+                  str(Path(__file__).resolve().parent.parent / "web"),
+                  str(Path(__file__).resolve().parents[3] / "web" / "out")]
+    for c in candidates:
+        if c and (Path(c) / "index.html").exists():
+            return c
+    return None
+
+
+WEB_DIR = _web_dir()
+
+
+@app.get("/app", include_in_schema=False)
+def web_app():
+    if WEB_DIR:
+        return RedirectResponse("/app/")
+    # Frontend not built: serve the simple built-in page.
+    return HTMLResponse(resources.files("nous_drive.api.static").joinpath("index.html").read_text())
+
+
+if WEB_DIR:
+    from fastapi.staticfiles import StaticFiles
+    app.mount("/app", StaticFiles(directory=WEB_DIR, html=True), name="web")
 
 
 # ------------------------------------------------------------------ email magic-link auth
@@ -115,9 +139,9 @@ def email_callback(token: str | None = None):
     try:
         member, key = accounts.redeem_login_token(token or "")
     except AuthError as e:
-        return RedirectResponse(f"/app#error={str(e)}")
+        return RedirectResponse(f"/app/login/#error={str(e)}" if WEB_DIR else f"/app#error={str(e)}")
     # Key goes in the hash so it never hits server access logs as a query param again.
-    return RedirectResponse(f"/app#session={key}")
+    return RedirectResponse(f"/app/#session={key}" if WEB_DIR else f"/app#session={key}")
 
 
 class InviteMember(BaseModel):
@@ -189,6 +213,79 @@ def me(ident: dict = Depends(admin)) -> dict:
 @app.get("/api/sources")
 def sources(ident: dict = Depends(reader)) -> dict:
     return T.list_sources(_ctx(ident))
+
+
+@app.get("/api/progress")
+def progress_now(ident: dict = Depends(reader)) -> dict:
+    from ..progress import snapshot
+    with db.scoped(ident["account_id"]) as conn:
+        return {"sources": snapshot(conn), "server_time": conn.execute("SELECT now() AS t").fetchone()["t"]}
+
+
+@app.get("/api/live")
+async def live(request: Request, ident: dict = Depends(reader)):
+    """Server-sent events for the web app: ``progress`` (every source, when anything moved),
+    ``changes`` (new change-log entries) and ``notification``. Clients read it with fetch() so the
+    bearer token stays in a header."""
+    import asyncio
+    import json as _json
+
+    import anyio
+    from fastapi.responses import StreamingResponse
+
+    from ..progress import snapshot
+
+    account_id = ident["account_id"]
+
+    def poll(last_event: int | None, last_note: int | None):
+        with db.scoped(account_id) as conn:
+            snap = snapshot(conn)
+            if last_event is None:
+                last_event = conn.execute("SELECT coalesce(max(id), 0) AS m FROM drive_index.change_events").fetchone()["m"]
+                last_note = conn.execute("SELECT coalesce(max(id), 0) AS m FROM drive_index.notifications").fetchone()["m"]
+                return snap, [], [], last_event, last_note
+            ch = conn.execute(
+                """SELECT e.id, e.type, e.kind, e.name, e.path, e.detected_at, e.before->>'path' AS from_path,
+                          s.name AS source, d.name AS device, n.size
+                   FROM drive_index.change_events e JOIN drive_index.sources s ON s.id = e.source_id
+                   LEFT JOIN drive_index.devices d ON d.id = e.device_id
+                   LEFT JOIN drive_index.nodes n ON n.id = e.node_id
+                   WHERE e.id > %s ORDER BY e.id DESC LIMIT 50""", (last_event,)).fetchall()
+            notes = conn.execute("SELECT * FROM drive_index.notifications WHERE id > %s ORDER BY id", (last_note,)).fetchall()
+        return snap, ch, notes, max([last_event] + [c["id"] for c in ch]), max([last_note] + [n["id"] for n in notes])
+
+    def sse(event: str, data) -> str:
+        return f"event: {event}\ndata: {_json.dumps(data, default=str)}\n\n"
+
+    async def stream():
+        last_event = last_note = None
+        last_snap = None
+        idle = 0
+        while True:
+            if await request.is_disconnected():
+                break
+            try:
+                snap, ch, notes, last_event, last_note = await anyio.to_thread.run_sync(poll, last_event, last_note)
+            except Exception as e:  # keep the stream alive across DB hiccups
+                log.warning("live stream poll failed: %s", e)
+                await asyncio.sleep(3)
+                continue
+            key = _json.dumps(snap, default=str, sort_keys=True)
+            if key != last_snap:
+                last_snap = key
+                yield sse("progress", {"sources": snap})
+            if ch:
+                yield sse("changes", {"changes": list(reversed(ch))})
+            for n in notes:
+                yield sse("notification", n)
+            idle += 1
+            if idle % 15 == 0:
+                yield ": keep-alive\n\n"
+            busy = any(p["busy"] for p in snap)
+            await asyncio.sleep(1.0 if busy else 3.0)
+
+    return StreamingResponse(stream(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 @app.get("/api/status")
@@ -268,7 +365,7 @@ def google_start(content: bool | None = None, connection_id: str | None = None, 
 def google_callback(code: str | None = None, state: str | None = None, error: str | None = None):
     from ..connectors.gdrive.auth import exchange_code, make_client, set_connection_identity, store_connection
     if error:
-        return RedirectResponse(f"/app#error={error}")
+        return RedirectResponse(f"/app/drive/#error={error}" if WEB_DIR else f"/app#error={error}")
     try:
         st = verify_state(state or "")
     except ValueError as e:
@@ -293,7 +390,8 @@ def google_callback(code: str | None = None, state: str | None = None, error: st
             add_default_my_drive(st["a"], conn_row["id"], email)
         except Exception as e:
             log.warning("could not add My Drive by default: %s", e)
-    return RedirectResponse(f"/app#drive/connected={conn_row['id']}")
+    return RedirectResponse(f"/app/drive/#connected={conn_row['id']}" if WEB_DIR
+                            else f"/app#drive/connected={conn_row['id']}")
 
 
 def _resume_after_reconnect(account_id, connection_id) -> None:
@@ -532,6 +630,16 @@ def changes(since: str = "24h", source: str | None = None, folder: str | None = 
 def search(q: str, source: str | None = None, mode: str = "name", limit: int = 30,
            ident: dict = Depends(reader)) -> dict:
     return _tool(T.search_files, _ctx(ident), q, source, None, None, True, "active", mode, limit)
+
+
+@app.get("/api/search/all")
+def search_all(q: str, mode: str = "all", source: str | None = None, folder: str | None = None,
+               type: str | None = None, ext: str | None = None, modified_after: str | None = None,
+               modified_before: str | None = None, added_after: str | None = None, limit: int = 30,
+               ident: dict = Depends(reader)) -> dict:
+    """Search page: contents + names with source/folder/type/time filters."""
+    return _tool(T.search, _ctx(ident), q, mode, source, folder, type, ext, modified_after, modified_before,
+                 added_after, limit)
 
 
 @app.get("/api/kb/search")

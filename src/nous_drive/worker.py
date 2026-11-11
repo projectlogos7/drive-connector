@@ -36,10 +36,16 @@ def dispatch(job: dict) -> None:
         raise ValueError(f"unknown job kind {kind}")
 
 
+TRANSIENT = ("DeadlockDetected", "SerializationFailure", "LockNotAvailable")
+
+
 def run_one(job: dict) -> bool:
     try:
         dispatch(job)
     except Exception as e:
+        if type(e).__name__ in TRANSIENT:
+            queue.fail(job, f"{type(e).__name__}: {e}", retry_in=1)
+            return False
         outcome = queue.fail(job, f"{type(e).__name__}: {e}\n{traceback.format_exc(limit=5)}")
         log.warning("job %s (%s) failed -> %s: %s", job["id"], job["kind"], outcome, e)
         return False

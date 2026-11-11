@@ -50,23 +50,26 @@ def enqueue(conn: Connection, account_id: UUID | str, kind: str, source_id: UUID
 def claim(limit: int = 1, kinds: list[str] | None = None) -> list[dict]:
     """Claim ready jobs. Jobs of a source run one at a time, so per-source order is kept."""
     with db.system() as conn:
+        # The candidate list is MATERIALIZED so the LIMIT applies exactly once. With a plain
+        # "WHERE id IN (SELECT ... LIMIT n FOR UPDATE SKIP LOCKED)" Postgres may re-run the subquery
+        # and claim far more than n rows, leaving hundreds of jobs stuck as 'running'.
         rows = conn.execute(
-            """UPDATE drive_index.index_jobs j SET status = 'running', locked_by = %s, locked_at = now(),
-                   attempts = attempts + 1
-               WHERE j.id IN (
-                 SELECT id FROM drive_index.index_jobs c
+            """WITH picked AS MATERIALIZED (
+                 SELECT c.id FROM drive_index.index_jobs c
                  WHERE c.status = 'pending' AND c.run_after <= now()
                    AND (%s::text[] IS NULL OR c.kind = ANY(%s::text[]))
-                   AND (c.source_id IS NULL OR NOT EXISTS (
+                   AND (c.source_id IS NULL OR c.kind IN ('content_process','content_embed') OR NOT EXISTS (
                          SELECT 1 FROM drive_index.index_jobs r
                          WHERE r.source_id = c.source_id AND r.status = 'running'
-                           AND r.kind NOT IN ('content_process','content_embed')
-                           AND c.kind NOT IN ('content_process','content_embed')))
+                           AND r.kind NOT IN ('content_process','content_embed')))
                  ORDER BY c.priority, c.id
-                 FOR UPDATE SKIP LOCKED
-                 LIMIT %s)
+                 LIMIT %s
+                 FOR UPDATE SKIP LOCKED)
+               UPDATE drive_index.index_jobs j SET status = 'running', locked_by = %s, locked_at = now(),
+                   attempts = attempts + 1
+               FROM picked WHERE j.id = picked.id
                RETURNING j.*""",
-            (WORKER_ID, kinds, kinds, limit),
+            (kinds, kinds, limit, WORKER_ID),
         ).fetchall()
     return rows
 
@@ -81,6 +84,18 @@ def complete(job_id: int) -> None:
 
 def fail(job: dict, error: str, retry_in: float | None = None) -> str:
     """Record a failure. Retries with exponential backoff; moves to 'dead' after max_attempts."""
+    for attempt in range(5):
+        try:
+            return _fail(job, error, retry_in)
+        except Exception as e:  # e.g. a deadlock while recording the failure itself
+            if type(e).__name__ not in ("DeadlockDetected", "SerializationFailure") or attempt == 4:
+                raise
+            import time
+            time.sleep(0.2 * (attempt + 1))
+    return "retry"
+
+
+def _fail(job: dict, error: str, retry_in: float | None = None) -> str:
     attempts = job["attempts"]
     dead = attempts >= job["max_attempts"]
     delay = retry_in if retry_in is not None else min(3600.0, 10.0 * (2 ** (attempts - 1)))

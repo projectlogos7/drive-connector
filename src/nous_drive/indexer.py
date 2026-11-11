@@ -80,13 +80,14 @@ def _content_hash_for(ev: NodeEvent, row: dict | None) -> str | None:
 
 class Indexer:
     def __init__(self, conn: Connection, account_id: UUID | str, source: dict[str, Any],
-                 device_id: UUID | str | None = None, content_policy=None):
+                 device_id: UUID | str | None = None, content_policy=None, on_event=None):
         self.conn = conn
         self.account_id = str(account_id)
         self.source = source
         self.source_id = str(source["id"])
         self.device_id = str(device_id) if device_id else (str(source["device_id"]) if source.get("device_id") else None)
         self.content_policy = content_policy
+        self.on_event = on_event  # called as on_event(event, index) for live progress
         self.stats = ApplyStats()
 
     # ------------------------------------------------------------------ helpers
@@ -199,7 +200,9 @@ class Indexer:
 
     # ------------------------------------------------------------------ public
     def apply(self, events: list[NodeEvent]) -> ApplyStats:
-        for ev in events:
+        for i, ev in enumerate(events):
+            if self.on_event:
+                self.on_event(ev, i)
             if ev.op == "upsert":
                 self._upsert(ev)
             elif ev.op in ("delete", "remove"):
@@ -209,8 +212,11 @@ class Indexer:
             elif ev.op == "available":
                 self._source_available(ev)
             self.stats.applied += 1
+        # Touch the source's "last synced" without waiting on a row another job holds (avoids deadlocks
+        # between parallel jobs of one source); a skipped touch is caught up by the next batch.
         self.conn.execute(
-            "UPDATE drive_index.sources SET last_sync_at = now(), updated_at = now() WHERE id = %s",
+            """UPDATE drive_index.sources SET last_sync_at = now(), updated_at = now()
+               WHERE id = (SELECT id FROM drive_index.sources WHERE id = %s FOR NO KEY UPDATE SKIP LOCKED)""",
             (self.source_id,),
         )
         return self.stats

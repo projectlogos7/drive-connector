@@ -67,3 +67,32 @@ def test_stale_running_jobs_requeued(account):
     with db.system() as conn:
         conn.execute("UPDATE drive_index.index_jobs SET locked_at = now() - interval '1 hour'")
     assert queue.requeue_stale(60) == 1
+
+
+def test_claim_never_takes_more_than_asked(account):
+    """Regression: an `IN (SELECT ... LIMIT n FOR UPDATE SKIP LOCKED)` claim could mark hundreds of
+    jobs 'running' at once, freezing progress until stale-job recovery."""
+    import threading
+    src = make_source(account["id"])
+    with db.scoped(account["id"]) as conn:
+        for i in range(400):
+            queue.enqueue(conn, account["id"], "content_process", src["id"], {"node_id": str(i)})
+    with db.system() as conn:
+        conn.execute("ANALYZE drive_index.index_jobs")
+    got = []
+    lock = threading.Lock()
+
+    def claimer():
+        for _ in range(5):
+            jobs = queue.claim(1)
+            with lock:
+                got.extend(jobs)
+    threads = [threading.Thread(target=claimer) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    with db.system() as conn:
+        running = conn.execute("SELECT count(*) AS n FROM drive_index.index_jobs WHERE status = 'running'").fetchone()["n"]
+    assert len(got) == 40 and len({j["id"] for j in got}) == 40
+    assert running == 40

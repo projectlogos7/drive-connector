@@ -16,7 +16,7 @@ from typing import Any
 from .. import db, queue
 from ..accounts import audit, get_source, merged_settings, set_status
 from ..config import get_settings
-from ..progress import view as progress_view
+from ..progress import snapshot as progress_snapshot
 from ..util import escape_like, human_size, normalize_user_path, utcnow
 
 
@@ -202,6 +202,7 @@ def get_sync_status(ctx: Ctx, source: str | None = None) -> dict:
     with db.scoped(ctx.account_id) as conn:
         only = resolve_source(conn, source)
         srcs = [only] if only else list(_sources(conn).values())
+        progress_map = {p["source_id"]: p for p in progress_snapshot(conn)}
         devices = {str(r["id"]): r for r in conn.execute("SELECT * FROM drive_index.devices")}
         out = []
         for src in srcs:
@@ -233,7 +234,7 @@ def get_sync_status(ctx: Ctx, source: str | None = None) -> dict:
                 "dead_letters": [{**d, "finished_at": _ts(d["finished_at"])} for d in dead],
                 "last_full_scan_at": _ts(cur.get("last_full_scan_at")),
                 "scan_progress": cur.get("scan_progress") or {},
-                "progress": progress_view(src, cur, pending_crawl=jobs.get("pending", 0) + jobs.get("running", 0) > 0),
+                "progress": progress_map.get(sid),
             }
             if src["type"] == "gdrive":
                 exp = cur.get("channel_expires_at")
@@ -439,6 +440,105 @@ def search_files(ctx: Ctx, query: str, source: str | None = None, type: str | No
             "next_cursor": _enc_cursor(nxt) if nxt is not None else None}
 
 
+def _node_filter(conn, src: dict | None, folder: str | None, type: str | None, ext: str | None,
+                 modified_after: str | None, modified_before: str | None, added_after: str | None) -> tuple[str, dict]:
+    """SQL conditions on alias ``n`` (nodes) shared by name and content search."""
+    conds, params = [], {}
+    if src:
+        conds.append("n.source_id = %(f_src)s")
+        params["f_src"] = str(src["id"])
+    if folder:
+        if not src:
+            raise ToolError("folder needs a source")
+        f = normalize_user_path(folder)
+        if f != "/":
+            conds.append("(n.path = %(f_folder)s OR n.path LIKE %(f_prefix)s)")
+            params["f_folder"], params["f_prefix"] = f, escape_like(f + "/") + "%"
+    if type:
+        conds.append("n.category = %(f_type)s")
+        params["f_type"] = type.lower()
+    if ext:
+        conds.append("n.ext = ANY(%(f_ext)s)")
+        params["f_ext"] = [e.strip().lstrip(".").lower() for e in ext.split(",") if e.strip()]
+    for key, op, val in (("f_ma", ">=", modified_after), ("f_mb", "<", modified_before)):
+        if val:
+            conds.append(f"n.modified_at_src {op} %({key})s")
+            params[key] = _parse_time(val)
+    if added_after:
+        conds.append("n.first_indexed_at >= %(f_aa)s")
+        params["f_aa"] = _parse_time(added_after)
+    return " AND ".join(conds), params
+
+
+def search(ctx: Ctx, query: str, mode: str = "all", source: str | None = None, folder: str | None = None,
+           type: str | None = None, ext: str | None = None, modified_after: str | None = None,
+           modified_before: str | None = None, added_after: str | None = None, limit: int = 30) -> dict:
+    """Search inside file contents and by name/path at once, with folder/type/time filters.
+
+    mode: 'all' (contents + names), 'content' (inside files: keyword + meaning), 'name' (names and paths).
+    Each result says how it matched ('name', 'content' or both) and carries a snippet for content matches.
+    """
+    if not query or not query.strip():
+        raise ToolError("query is required")
+    lim = _limit(limit, 30)
+    with db.scoped(ctx.account_id) as conn:
+        src = resolve_source(conn, source)
+        filt_sql, filt_params = _node_filter(conn, src, folder, type, ext, modified_after, modified_before, added_after)
+        srcs, devs = _sources(conn), _devices(conn)
+        results: dict[str, dict] = {}
+        content_ok = _content_available(conn)
+        if mode in ("all", "content") and content_ok:
+            from ..content.search import search_content
+            for rank, h in enumerate(search_content(conn, query, limit=lim, mode="hybrid", node_filter=(filt_sql, filt_params))):
+                results[h["node_id"]] = {"node_id": h["node_id"], "snippet": h["snippet"], "match": ["content"],
+                                         "score": 1.0 / (10 + rank)}
+        if mode in ("all", "name"):
+            terms = [t for t in query.lower().replace("/", " ").split() if t]
+            q = query.strip().lower()
+            where = ["NOT n.is_root", "n.status = 'active'",
+                     "n.id IN (SELECT node_id FROM drive_index.match_paths(%(pats)s, %(pref)s, %(cand)s))"]
+            if filt_sql:
+                where.append(filt_sql)
+            rows = conn.execute(
+                f"""SELECT n.id, CASE WHEN lower(n.name) = %(q)s THEN 0 WHEN lower(n.name) LIKE %(pref)s THEN 1
+                                    WHEN lower(n.name) LIKE %(any)s THEN 2 ELSE 3 END AS r
+                    FROM drive_index.nodes n WHERE {' AND '.join(where)}
+                    ORDER BY r, n.modified_at_src DESC NULLS LAST LIMIT %(lim)s""",
+                {**filt_params, "q": q, "pref": escape_like(q) + "%", "any": "%" + escape_like(q) + "%",
+                 "pats": ["%" + escape_like(t) + "%" for t in terms], "cand": SEARCH_CANDIDATES, "lim": lim}).fetchall()
+            for rank, r in enumerate(rows):
+                nid = str(r["id"])
+                boost = {0: 1.0, 1: 0.5, 2: 0.2}.get(r["r"], 0.05) / (1 + rank * 0.05)
+                if nid in results:
+                    results[nid]["match"].append("name")
+                    results[nid]["score"] += boost
+                else:
+                    results[nid] = {"node_id": nid, "snippet": None, "match": ["name"], "score": boost}
+        ranked = sorted(results.values(), key=lambda x: x["score"], reverse=True)[:lim]
+        nodes = {str(r["id"]): r for r in conn.execute(
+            "SELECT * FROM drive_index.nodes WHERE id = ANY(%s)", ([x["node_id"] for x in ranked],))}
+        summaries = {}
+        if content_ok and nodes:
+            summaries = {str(r["node_id"]): r["summary"] for r in conn.execute(
+                """SELECT s.node_id, s.summary FROM drive_index.summaries s JOIN drive_index.nodes n ON n.id = s.node_id
+                   WHERE s.node_id = ANY(%s) AND s.content_version = n.content_version""", (list(nodes),))}
+    out = []
+    for x in ranked:
+        n = nodes.get(x["node_id"])
+        if not n:
+            continue
+        item = _node_brief(n, srcs, devs)
+        item.update(match=x["match"], snippet=x["snippet"], score=round(x["score"], 4),
+                    content_status=n["content_status"])
+        if x["node_id"] in summaries:
+            item["summary"] = summaries[x["node_id"]]
+        out.append(item)
+    return {"query": query, "mode": mode, "content_search": content_ok, "returned": len(out), "results": out,
+            "filters": {k: v for k, v in dict(source=src["name"] if src else None, folder=folder, type=type, ext=ext,
+                                               modified_after=modified_after, modified_before=modified_before,
+                                               added_after=added_after).items() if v}}
+
+
 def _content_available(conn) -> bool:
     return bool(conn.execute(
         "SELECT to_regclass('drive_index.chunks') IS NOT NULL AS ok").fetchone()["ok"])
@@ -619,8 +719,9 @@ def list_changes(ctx: Ctx, since: str | None = "24h", until: str | None = None, 
         w = " AND ".join(where)
         total, more = _capped_count(conn, f"FROM drive_index.change_events e WHERE {w}", params)
         rows = conn.execute(
-            f"""SELECT e.*, d.name AS device_name FROM drive_index.change_events e
+            f"""SELECT e.*, d.name AS device_name, nd.size AS node_size FROM drive_index.change_events e
                 LEFT JOIN drive_index.devices d ON d.id = e.device_id
+                LEFT JOIN drive_index.nodes nd ON nd.id = e.node_id
                 WHERE {w} ORDER BY e.id DESC LIMIT %s OFFSET %s""", params + [lim, off]).fetchall()
         srcs = _sources(conn)
     out = []
@@ -629,7 +730,8 @@ def list_changes(ctx: Ctx, since: str | None = "24h", until: str | None = None, 
         item = {"event_id": r["id"], "type": r["type"], "kind": r["kind"], "name": r["name"], "path": r["path"],
                 "source": srcs[str(r["source_id"])]["name"] if str(r["source_id"]) in srcs else None,
                 "node_id": str(r["node_id"]) if r["node_id"] else None,
-                "occurred_at": _ts(r["occurred_at"]), "detected_at": _ts(r["detected_at"])}
+                "occurred_at": _ts(r["occurred_at"]), "detected_at": _ts(r["detected_at"]),
+                "size": r["node_size"] if r["kind"] == "file" else None}
         if r["type"] in ("renamed", "moved"):
             item["from"] = b.get("path")
         if r["type"] == "modified" and b.get("size") != a.get("size"):

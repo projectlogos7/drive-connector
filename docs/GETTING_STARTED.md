@@ -12,7 +12,13 @@ nous-drive migrate
 nous-drive create-account "Nous" --email you@example.org   # prints an admin key; the email can sign in by link
 ```
 
-Run three processes (or `docker compose up`):
+Build the web app once (Next.js; the API serves it at `/app`):
+
+```bash
+cd web && npm ci && NODE_ENV=production npx next build && cd ..
+```
+
+Run three processes (or `docker compose up`, which also builds the web app):
 
 ```bash
 nous-drive serve --port 8080          # web app + API          → https://<your-domain>/app
@@ -94,6 +100,14 @@ Edit `claude_desktop_config.json` (Settings → Developer → Edit config):
 
 Restart Claude Desktop; "nous-drive" appears in the tools list.
 
+### The web app
+
+* **Overview** — every source with a live progress bar: the step it is on (finding files → indexing →
+  reading contents → making searchable), done/total, the file being processed and its size, speed and time left.
+* **Search** — search inside documents and by name; filter by source, *only inside a folder*, type, and
+  modified/added time. Filters are kept in the URL, so a search can be bookmarked or shared.
+* **Google Drive / Computers** — what's connected and watched; **Activity** — every change, live.
+
 ### Things to ask Claude
 
 * "What's new in my Drive?" (asks again later → only what arrived in between)
@@ -103,7 +117,7 @@ Restart Claude Desktop; "nous-drive" appears in the tools list.
 * "Search inside my documents for the Bengal partition." (content search)
 * "Is the sync on my MacBook healthy?" · "Re-scan the Footage folder."
 
-Tools available: `list_sources`, `get_sync_status`, `get_tree`, `list_files`, `search_files`, `get_file`,
+Tools available: `search` (contents + names, with folder/type/time filters), `list_sources`, `get_sync_status`, `get_tree`, `list_files`, `search_files`, `get_file`,
 `whats_new`, `list_changes`, `describe_file`, `list_notifications`, `resync_source`, `pause_source`,
 `resume_source`, `get_connect_link`.
 

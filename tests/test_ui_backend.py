@@ -105,11 +105,14 @@ def test_local_scan_progress(account, api, tmp_path, monkeypatch):
     tok = api.post("/agent/pair", json={"code": code, "machine_id": "m1"}).json()["token"]
     sid = api.post("/agent/sources", json={"path": "/Users/n/Footage"}, headers=H(tok)).json()["id"]
     p = T.get_sync_status(T.Ctx(account_id=account["id"]))["sources"][0]["progress"]
-    assert p["phase"] == "waiting_for_device"
+    assert p["busy"] and p["label"] == "Waiting for the computer"
     api.post(f"/agent/sources/{sid}/scan/begin", json={"scan_id": "s1", "full": True, "total": 4}, headers=H(tok))
-    ev = [{"provider_id": f"p{i}", "name": f"{i}.mov", "parent_provider_id": "__root__", "scan_id": "s1"} for i in range(2)]
+    ev = [{"provider_id": f"p{i}", "name": f"{i}.mov", "parent_provider_id": "__root__", "scan_id": "s1",
+           "size": 1000 * (i + 1)} for i in range(2)]
     api.post(f"/agent/sources/{sid}/events", json={"events": ev, "scan_id": "s1"}, headers=H(tok))
     drain()
-    p = T.get_sync_status(T.Ctx(account_id=account["id"]))["sources"][0]["progress"]
-    assert (p["phase"], p["done"], p["total"], p["percent"]) == ("listing", 2, 4, 50)
-    assert "2 of 4" in p["label"]
+    p = api.get("/api/progress", headers=H(k)).json()["sources"][0]
+    index = next(st for st in p["stages"] if st["key"] == "index")
+    assert (index["state"], index["done"], index["total"]) == ("active", 2, 4)
+    assert "Indexing files — 2 of 4" == p["label"] and 0 < p["percent"] < 99
+    assert p["current"]["name"] == "1.mov" and p["current"]["size"] == 2000 and p["current"]["action"] == "Indexing"

@@ -134,3 +134,32 @@ def test_phase2_on_by_default_with_queued_embedding_and_no_llm(account, monkeypa
     assert n["content_status"] == "extracted"
     assert emb and summ["model"] == "extractive"   # no LLM used
     assert T.search_files(T.Ctx(account_id=account["id"]), "schedule Madarasa", mode="content")["results"]
+
+
+def test_combined_search_with_folder_type_and_time_filters(account, monkeypatch, content_on):
+    from nous_drive.content.pipeline import embed_node
+    src = make_source(account["id"], settings={"content": {"enabled": True}})
+    from .conftest import apply
+    apply(account["id"], src, [
+        dict(provider_id="ep1", name="Episode 1", parent_provider_id="ROOT", kind="folder"),
+        dict(provider_id="ep2", name="Episode 2", parent_provider_id="ROOT", kind="folder"),
+        dict(provider_id="a", name="script.txt", parent_provider_id="ep1", size=10),
+        dict(provider_id="b", name="notes.txt", parent_provider_id="ep2", size=10),
+        dict(provider_id="c", name="Curzon letters.txt", parent_provider_id="ep2", size=10),
+    ])
+    n = nodes(account["id"])
+    for pid, text in (("a", "Curzon announced the partition of Bengal in 1905."),
+                      ("b", "Curzon and the partition, second draft."), ("c", "Unrelated shopping list.")):
+        store_text(account["id"], str(n[pid]["id"]), text, "test")
+        embed_node(account["id"], str(n[pid]["id"]))
+    ctx = T.Ctx(account_id=account["id"])
+    r = T.search(ctx, "Curzon")
+    by = {x["name"]: x["match"] for x in r["results"]}
+    assert set(by) == {"script.txt", "notes.txt", "Curzon letters.txt"}
+    assert by["Curzon letters.txt"] == ["name"] and "content" in by["script.txt"]
+    only = T.search(ctx, "Curzon", source="Projects", folder="/Episode 1")
+    assert [x["name"] for x in only["results"]] == ["script.txt"]
+    assert "Curzon" in only["results"][0]["snippet"]
+    assert T.search(ctx, "Curzon", mode="name")["returned"] == 1
+    assert T.search(ctx, "Curzon", modified_after="1h")["returned"] == 0  # no modified time set on these
+    assert T.search(ctx, "Curzon", added_after="1h")["returned"] == 3

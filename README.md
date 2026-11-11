@@ -51,7 +51,16 @@ the PRD, and [agent/README.md](agent/README.md) for the local agent.
    `drive.readonly` ("Connect with content access" in the web app). For push notifications the public URL
    must be HTTPS; without it the connector polls the changes feed (every 5 minutes).
 
-3. **Run** the API, worker and MCP server (or `docker compose up`):
+3. **Build the web app** (Next.js, in `web/`; the API serves the build at `/app`):
+
+   ```bash
+   cd web && npm ci && NODE_ENV=production npx next build && cd ..
+   ```
+
+   For frontend development: run the API on :8080, then `cd web && npm run dev` and open
+   http://localhost:3000/app/ (API calls are proxied). Docker builds the web app automatically.
+
+4. **Run** the API, worker and MCP server (or `docker compose up`):
 
    ```bash
    nous-drive serve --port 8080
@@ -59,7 +68,7 @@ the PRD, and [agent/README.md](agent/README.md) for the local agent.
    nous-drive mcp --http --port 8090      # or use stdio from the MCP client
    ```
 
-4. **Connect sources** in the web app at `<PUBLIC_BASE_URL>/app` (sign in with an emailed link, or an admin key).
+5. **Connect sources** in the web app at `<PUBLIC_BASE_URL>/app` (sign in with an emailed link, or an admin key).
    The app has separate sections for **Google Drive**, **Computers**, **Activity**, **Claude access** and **People**.
    * *Google Drive → Connect Google account*: after Google sign-in the **whole My Drive is added and indexing
      starts immediately**; a dialog then lets you keep it or switch to specific folders (folder tree with

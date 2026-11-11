@@ -16,6 +16,7 @@ from ...config import get_settings
 from ...crypto import hash_key
 from ...indexer import Indexer
 from ...models import NodeEvent
+from ...reporter import file_info, report
 from ...util import utcnow
 from .auth import make_client
 from .client import FOLDER_MIME, AuthExpired, DriveClient
@@ -48,10 +49,19 @@ class DriveSync:
         self._known_folders: set[str] | None = None
 
     # ------------------------------------------------------------------ persistence
+    def _live(self, stage: str, base: int = 0, total: int | None = None, count: int | None = None):
+        last = (count or 0) - 1
+
+        def on_event(ev: NodeEvent, i: int) -> None:
+            if ev.op == "upsert" or i == last:
+                report(self.account_id, self.source_id, stage, done=base + i + 1, total=total, active=True,
+                       force=i == last, current=file_info(ev.name, ev.size, None, ev.kind))
+        return on_event
+
     def _apply(self, events: list[NodeEvent], cursor: dict | None = None, finish_scan: str | None = None,
-               rebuild: bool = False, scan_started_at=None) -> None:
+               rebuild: bool = False, scan_started_at=None, on_event=None) -> None:
         with db.scoped(self.account_id) as conn:
-            ix = Indexer(conn, self.account_id, self.source, content_policy=_content_policy())
+            ix = Indexer(conn, self.account_id, self.source, content_policy=_content_policy(), on_event=on_event)
             if events:
                 ix.apply(events)
             if rebuild:
@@ -141,6 +151,8 @@ class DriveSync:
             "drive_page_token": token, "last_full_scan_at": utcnow(), "scan_progress": progress,
             "current_scan_id": None, "last_poll_at": utcnow(),
         })
+        report(self.account_id, self.source_id, "index", done=progress["files"] + progress["folders"],
+               total=progress.get("total"), active=False, current={}, force=True)
         self._status("live")
         try:
             self.ensure_channel()
@@ -157,6 +169,7 @@ class DriveSync:
             for files in self.client.iter_files(drive_id=self.drive_id, corpora=corpora, fields=light, page_size=1000):
                 n += sum(1 for f in files if self._in_flat_scope(f))
                 progress["counted"] = n
+                report(self.account_id, self.source_id, "discover", done=n, active=True, force=True)
                 self._apply([], cursor={"scan_progress": progress})
             return n
         frontier = [self.source["root_ref"]]
@@ -167,6 +180,7 @@ class DriveSync:
                 n += len(files)
                 frontier += [f["id"] for f in files if f.get("mimeType") == FOLDER_MIME]
                 progress["counted"] = n
+                report(self.account_id, self.source_id, "discover", done=n, active=True, force=True)
                 self._apply([], cursor={"scan_progress": progress})
         return n
 
@@ -183,10 +197,12 @@ class DriveSync:
             page = self.client.list_files(page_token=progress.get("page_token"), drive_id=self.drive_id,
                                           corpora=corpora)
             files = [f for f in page.get("files", []) if self._in_flat_scope(f)]
+            base = progress["files"] + progress["folders"]
             self._count(progress, files)
             events = [file_to_event(f, self.source, scan_id=progress["scan_id"]) for f in files]
             progress["page_token"] = page.get("nextPageToken")
-            self._apply(events, cursor={"scan_progress": progress})
+            self._apply(events, cursor={"scan_progress": progress},
+                        on_event=self._live("index", base, progress.get("total"), len(events)))
             if not progress["page_token"]:
                 break
 
@@ -206,6 +222,7 @@ class DriveSync:
             page = self.client.list_files(q=q, page_token=progress.get("page_token"), drive_id=None,
                                           corpora="allDrives")
             files = page.get("files", [])
+            base = progress["files"] + progress["folders"]
             self._count(progress, files)
             batch_set = set(batch)
             events = []
@@ -217,7 +234,8 @@ class DriveSync:
             progress["page_token"] = page.get("nextPageToken")
             if not progress["page_token"]:
                 progress["batch"] = None
-            self._apply(events, cursor={"scan_progress": progress})
+            self._apply(events, cursor={"scan_progress": progress},
+                        on_event=self._live("index", base, progress.get("total"), len(events)))
 
     def crawl_subtree(self, folder_id: str, scan_id: str | None = None) -> int:
         """Index everything below a folder that just entered the source (its children are not in the feed)."""
@@ -250,7 +268,8 @@ class DriveSync:
             events, entered = self._changes_to_events(page.get("changes", []))
             nxt = page.get("nextPageToken") or page.get("newStartPageToken")
             # Token advances in the same transaction that commits the batch (8.4).
-            self._apply(events, cursor={"drive_page_token": nxt, "last_poll_at": utcnow()})
+            self._apply(events, cursor={"drive_page_token": nxt, "last_poll_at": utcnow()},
+                        on_event=self._live("sync", 0, len(events), len(events)) if events else None)
             for fid in entered:
                 n += self.crawl_subtree(fid)
             n += len(events)

@@ -146,6 +146,20 @@ def build_server(http: bool = False) -> MCPServer:
                      limit: Annotated[int, Field(ge=1, le=200)] = 30, cursor: str | None = None) -> dict:
         return _run(T.search_files, _ctx(), query, source, type, ext, include_folders, status, mode, limit, cursor)
 
+    @mcp.tool(description="Search inside file contents and by name at once. Filter to one source, only inside a folder "
+                          "(path within the source), by type/extension, or by modified/added time. Results say whether they "
+                          "matched by content or name and include a snippet and summary.")
+    def search(query: str,
+               mode: Literal["all", "content", "name"] = "all",
+               source: Annotated[str | None, Field(description="Source id or name")] = None,
+               folder: Annotated[str | None, Field(description="Only inside this folder path (needs source)")] = None,
+               type: str | None = None, ext: str | None = None,
+               modified_after: Annotated[str | None, Field(description="ISO time, 'today', 'yesterday' or relative like '7d'")] = None,
+               modified_before: str | None = None, added_after: str | None = None,
+               limit: Annotated[int, Field(ge=1, le=100)] = 20) -> dict:
+        return _run(T.search, _ctx(), query, mode, source, folder, type, ext, modified_after, modified_before,
+                    added_after, limit)
+
     @mcp.tool(description="Full metadata for one file or folder: path, links, owner, sizes, device, shortcut "
                           "target, other parents, content summary (if extracted) and its own change history.")
     def get_file(node_id: str | None = None, path: str | None = None, source: str | None = None) -> dict:

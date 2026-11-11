@@ -76,11 +76,15 @@ def store_text(account_id, node_id: str, text: str, extractor: str, expected_has
 
 def embed_node(account_id, node_id: str) -> dict:
     """content_embed job: embed the current version's chunks (in-house model by default) and summarise."""
+    from ..reporter import file_info, report
     embedder = get_embedder()
     with db.scoped(account_id) as conn:
         node = conn.execute("SELECT * FROM drive_index.nodes WHERE id = %s", (node_id,)).fetchone()
         if not node or node["content_status"] != "extracted":
             return {"skipped": True}
+    report(account_id, node["source_id"], "embed", active=True, interval=0.2,
+           current=file_info(node["name"], node["size"], node["path"], "file"))
+    with db.scoped(account_id) as conn:
         version = node["content_version"]
         chunks = conn.execute(
             """SELECT c.id, c.text FROM drive_index.chunks c LEFT JOIN drive_index.embeddings e
@@ -139,14 +143,21 @@ def run_job(job: dict) -> None:
         return
     if source["type"] != "gdrive":
         return
+    from ..reporter import file_info, report
+    report(account_id, node["source_id"], "content", active=True, interval=0.2,
+           current=file_info(node["name"], node["size"], node["path"], "file"))
     try:
-        data, mime, ext = _fetch_drive_bytes(account_id, source, node)
+        data, mime, ext = _fetch_drive_bytes(account_id, source, node)  # network errors retry via the queue
+    except ContentError as e:
+        mark_failed(account_id, node_id, str(e))
+        return
+    try:
         text, extractor = extract_text(data, mime, ext)
     except UnsupportedType as e:
         mark_failed(account_id, node_id, str(e), status="skipped")
         return
-    except ContentError as e:
-        mark_failed(account_id, node_id, str(e))
+    except Exception as e:  # corrupt or mislabelled file: retrying will not help
+        mark_failed(account_id, node_id, f"could not read file: {type(e).__name__}: {e}")
         return
     store_text(account_id, node_id, text, extractor, expected_hash=node["content_hash"])
 

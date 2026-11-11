@@ -144,6 +144,9 @@ def submit_content(account_id, device_id, node_id: str, text: str | None, extrac
         ).fetchone()
     if not node:
         raise IngestError("node not found for this device")
+    from .reporter import file_info, report
+    report(account_id, node["source_id"], "content", active=True, interval=0.2,
+           current=file_info(node["name"], node["size"], node["path"], "file"))
     if error:
         mark_failed(account_id, node_id, error, status="skipped" if error.startswith("unsupported") else "failed")
         return {"status": "recorded"}
@@ -159,7 +162,22 @@ def apply_job(job: dict) -> dict:
         src = get_source(conn, job["source_id"])
         if not src:
             return {}
-        ix = Indexer(conn, job["account_id"], src, device_id=p.get("device_id"), content_policy=should_extract)
+        from .reporter import file_info, report
+        cur = conn.execute("SELECT current_scan_id, scan_progress FROM drive_index.sync_cursors WHERE source_id = %s",
+                           (job["source_id"],)).fetchone() or {}
+        sp = cur.get("scan_progress") or {}
+        in_scan = any(e.get("scan_id") and e.get("scan_id") == cur.get("current_scan_id") for e in p.get("events", []))
+        base, total, stage = (sp.get("processed") or 0, sp.get("total"), "index") if in_scan else \
+            (0, len(p.get("events", [])), "sync")
+
+        last = len(p.get("events", [])) - 1
+
+        def on_event(ev, i):
+            if ev.op == "upsert" or i == last:
+                report(job["account_id"], job["source_id"], stage, done=base + i + 1, total=total, active=True,
+                       force=i == last, current=file_info(ev.name, ev.size, None, ev.kind))
+        ix = Indexer(conn, job["account_id"], src, device_id=p.get("device_id"), content_policy=should_extract,
+                     on_event=on_event if job["kind"] == "apply_events" else None)
         if src["type"] == "local":
             ix.ensure_root(src["name"], "__root__", local_path=src["root_ref"])
         if job["kind"] == "apply_events":
@@ -188,6 +206,7 @@ def apply_job(job: dict) -> dict:
         )
         if src["status"] in ("connecting", "initial_scan") or (src["status"] == "degraded"):
             set_status(conn, src["id"], "live")
+        report(job["account_id"], job["source_id"], "index", active=False, current={}, force=True)
         from .stats import refresh
         refresh(conn, src["id"])
         audit(conn, job["account_id"], f"device:{p.get('device_id')}", "scan.completed", str(src["id"]),

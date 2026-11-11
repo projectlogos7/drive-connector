@@ -112,11 +112,20 @@ is degraded for over 30 minutes or a device is offline for a long time while its
 
 ## Phase 2: content
 
+Runs entirely in-house by default — **no API keys and no per-use cost**:
+
+| Piece | Default (free, in-house) | Other options |
+| --- | --- | --- |
+| Text extraction | built in (PDF, Word, Excel, PowerPoint, Google Docs/Sheets/Slides, text) | — |
+| Embeddings (meaning search) | `fastembed`: open multilingual model (paraphrase-multilingual-MiniLM-L12-v2, English/Hindi/Urdu and 50+ languages) on CPU; downloaded once, ~220 MB | `hash` (no model, keyword-like only), `voyage` (paid API) |
+| Summaries | `extractive`: the file's opening sentences | `ollama`: an open LLM on your own server (e.g. `ollama pull qwen2.5:3b`), `claude`: paid API, cheapest model (Haiku 5.5) with input capped at ~6k tokens per file |
+| Keyword search | Postgres full-text | — |
+
 ```bash
+pip install -e ".[content]"
 NOUS_DRIVE_CONTENT_ENABLED=true
-NOUS_DRIVE_EMBEDDING_PROVIDER=voyage   # or local (deterministic hashing, no network)
-VOYAGE_API_KEY=…                        # for voyage
-ANTHROPIC_API_KEY=…                     # summaries with Claude (falls back to extractive without it)
+# optional in-house LLM summaries:
+#   install Ollama on the server, `ollama pull qwen2.5:3b`, then NOUS_DRIVE_SUMMARY_PROVIDER=ollama
 ```
 
 Then per source: `PATCH /api/sources/<id>/settings {"content": {"enabled": true, "extensions": [], "max_bytes": null, "skip_folders": ["/Archive"]}}`
@@ -124,6 +133,7 @@ and `POST /api/sources/<id>/backfill-content`. Drive files are downloaded/export
 content scope); local files are extracted on the machine by the agent, which sends text only for files the
 server requests. Re-extraction happens only when the file's content hash changes; every version's text and
 summary is kept. `search_files(mode="content")` and `GET /api/kb/search` do hybrid keyword + vector search.
+If you change the embedding model later, run `nous-drive reembed`.
 
 ## Tests
 

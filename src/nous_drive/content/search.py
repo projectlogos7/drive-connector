@@ -28,14 +28,16 @@ def search_content(conn: Connection, query: str, limit: int = 20, source_ids: li
             params,
         ).fetchall()
     if mode in ("semantic", "hybrid"):
-        vec = get_embedder().embed([query], "query")[0]
+        embedder = get_embedder()
+        vec = embedder.embed([query], "query")[0]
         semantic = conn.execute(
             f"""SELECT c.id AS chunk_id, c.node_id, c.text, 1 - (e.embedding <=> %(v)s::vector) AS score
                 FROM drive_index.embeddings e JOIN drive_index.chunks c ON c.id = e.chunk_id
                 JOIN drive_index.nodes n ON n.id = c.node_id
-                WHERE n.status = 'active' AND c.content_version = n.content_version {src_filter}
+                WHERE n.status = 'active' AND c.content_version = n.content_version AND e.model = %(model)s
+                  {src_filter}
                 ORDER BY e.embedding <=> %(v)s::vector LIMIT %(lim)s""",
-            dict(params, v=to_pgvector(vec)),
+            dict(params, v=to_pgvector(vec), model=embedder.name),
         ).fetchall()
     fused: dict[str, dict] = {}
     for lst in (keyword, semantic):

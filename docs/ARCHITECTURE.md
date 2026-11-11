@@ -22,7 +22,7 @@ src/nous_drive/
   retention.py         90-day purge of change log and tombstones
   connectors/gdrive/   client (rate limit, backoff, token refresh) · auth (OAuth, encrypted tokens)
                        mapping (Drive file → NodeEvent) · sync (crawl, changes feed, reconcile, channels, webhook)
-  content/             policy · extract · chunk · embed (local hash / Voyage) · summarize (Claude) · pipeline · search
+  content/             policy · extract · chunk · embed (in-house fastembed / hash / Voyage) · summarize (extractive / Ollama / Claude) · pipeline · search
   mcp/tools.py         MCP tools as plain functions (tested directly)
   mcp/server.py        MCP server (stdio + streamable HTTP with bearer keys), notifications resource
   api/app.py           FastAPI: web app API, OAuth callback, webhook, agent ingest, read + KB APIs, metrics
@@ -109,7 +109,7 @@ The same mechanism drives notification batching.
 | 8.5 security | read-only scopes, Fernet-encrypted tokens, hashed keys, per-device revocation, webhook channel token check, audit log |
 | 8.6 observability | `get_sync_status` (lag, events/min, errors, queue depth, dead letters, last sync), `/metrics` (Prometheus), alerts after 30 min degraded / long device offline |
 | 9 edge cases | moved out of folder → `removed`; big folder move → one cascade; multi-parent/shortcuts; permission loss → `delete` with reason; nested local roots rejected; source + detected time; Unicode/long names, case-only renames tested; re-pair without re-index (snapshot kept) |
-| 10 Phase 2 | `content/*`: extraction (PDF, DOCX, XLSX, PPTX, Google Docs/Sheets/Slides export, text, HTML, RTF, CSV, JSON), re-extract only on hash change with versions kept, chunks + embeddings (pgvector, HNSW), Claude summaries, hybrid search in `search_files` and `GET /api/kb/search`, per-source content settings, agent-side extraction for local files |
+| 10 Phase 2 | `content/*`: extraction (PDF, DOCX, XLSX, PPTX, Google Docs/Sheets/Slides export, text, HTML, RTF, CSV, JSON), re-extract only on hash change with versions kept, chunks + embeddings (pgvector, HNSW; in-house multilingual model by default), summaries (extractive by default, Ollama in-house or Claude optional), hybrid search in `search_files` and `GET /api/kb/search`, per-source content settings, agent-side extraction for local files |
 
 ## Load test (M5)
 

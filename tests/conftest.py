@@ -12,6 +12,7 @@ os.environ.setdefault("NOUS_DRIVE_PUBLIC_BASE_URL", "https://drive-index.test")
 os.environ.setdefault("NOUS_DRIVE_GOOGLE_CLIENT_ID", "cid")
 os.environ.setdefault("NOUS_DRIVE_GOOGLE_CLIENT_SECRET", "csecret")
 os.environ["NOUS_DRIVE_SUMMARY_PROVIDER"] = "extractive"
+os.environ["NOUS_DRIVE_EMBEDDING_PROVIDER"] = "hash"  # no model download in tests
 os.environ.pop("ANTHROPIC_API_KEY", None)
 
 import psycopg

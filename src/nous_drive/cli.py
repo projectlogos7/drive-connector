@@ -37,6 +37,7 @@ def main(argv: list[str] | None = None) -> int:
     m.add_argument("--host", default="127.0.0.1")
     m.add_argument("--port", type=int, default=8090)
     sub.add_parser("purge", help="apply retention now")
+    sub.add_parser("reembed", help="recompute embeddings after changing the embedding model")
     args = p.parse_args(argv)
 
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
@@ -76,6 +77,9 @@ def main(argv: list[str] | None = None) -> int:
     elif args.cmd == "mcp":
         from .mcp.server import main as mcp_main
         mcp_main(http=args.http, host=args.host, port=args.port)
+    elif args.cmd == "reembed":
+        from .content.pipeline import reembed
+        print(json.dumps({"reembedded_chunks": reembed()}))
     elif args.cmd == "purge":
         from .retention import purge
         print(json.dumps(purge()))

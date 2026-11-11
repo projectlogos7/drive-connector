@@ -71,11 +71,18 @@ class Settings:
     content_enabled: bool = field(default_factory=lambda: _bool("CONTENT_ENABLED", False))
     content_max_bytes: int = field(default_factory=lambda: _int("CONTENT_MAX_BYTES", 50 * 1024 * 1024))
     content_max_chars: int = field(default_factory=lambda: _int("CONTENT_MAX_CHARS", 2_000_000))
-    embedding_provider: str = field(default_factory=lambda: _env("EMBEDDING_PROVIDER", "local"))
+    embedding_provider: str = field(default_factory=lambda: _env("EMBEDDING_PROVIDER", "fastembed"))
+    embedding_model: str = field(default_factory=lambda: _env(
+        "EMBEDDING_MODEL", "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"))
+    embedding_cache_dir: str | None = field(default_factory=lambda: _env("EMBEDDING_CACHE_DIR"))
     voyage_api_key: str | None = field(default_factory=lambda: os.environ.get("VOYAGE_API_KEY"))
     voyage_model: str = field(default_factory=lambda: _env("VOYAGE_MODEL", "voyage-3"))
-    summary_provider: str = field(default_factory=lambda: _env("SUMMARY_PROVIDER", "claude"))
-    summary_model: str = field(default_factory=lambda: _env("SUMMARY_MODEL", "claude-opus-5-5"))
+    # extractive (free, default) | ollama (in-house LLM) | claude (paid API, cheapest model by default)
+    summary_provider: str = field(default_factory=lambda: _env("SUMMARY_PROVIDER", "extractive"))
+    summary_model: str = field(default_factory=lambda: _env("SUMMARY_MODEL", "claude-haiku-5-5"))
+    ollama_url: str = field(default_factory=lambda: _env("OLLAMA_URL", "http://localhost:11434"))
+    ollama_model: str = field(default_factory=lambda: _env("OLLAMA_MODEL", "qwen2.5:3b"))
+    summary_max_input_chars: int = field(default_factory=lambda: _int("SUMMARY_MAX_INPUT_CHARS", 24_000))
 
     # Worker
     worker_concurrency: int = field(default_factory=lambda: _int("WORKER_CONCURRENCY", 4))

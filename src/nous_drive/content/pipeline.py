@@ -136,3 +136,28 @@ def request_backfill(conn, account_id, source_id, actor: str) -> int:
             n += 1
     audit(conn, account_id, actor, "content.backfill", str(source_id), {"queued": n})
     return n
+
+
+def reembed(batch: int = 200) -> int:
+    """Recompute embeddings made with a different model than the configured one (after switching model)."""
+    embedder = get_embedder()
+    total = 0
+    while True:
+        with db.system() as conn:
+            rows = conn.execute(
+                """SELECT c.id, c.text, c.account_id, c.node_id FROM drive_index.chunks c
+                   LEFT JOIN drive_index.embeddings e ON e.chunk_id = c.id
+                   WHERE e.chunk_id IS NULL OR e.model <> %s ORDER BY c.id LIMIT %s""",
+                (embedder.name, batch),
+            ).fetchall()
+            if not rows:
+                return total
+            vecs = embedder.embed([r["text"] for r in rows], "document")
+            for r, v in zip(rows, vecs):
+                conn.execute(
+                    """INSERT INTO drive_index.embeddings (chunk_id, account_id, node_id, model, embedding)
+                       VALUES (%s,%s,%s,%s,%s::vector) ON CONFLICT (chunk_id) DO UPDATE
+                       SET model = EXCLUDED.model, embedding = EXCLUDED.embedding""",
+                    (r["id"], r["account_id"], r["node_id"], embedder.name, to_pgvector(v)),
+                )
+        total += len(rows)

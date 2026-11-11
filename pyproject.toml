@@ -16,10 +16,12 @@ dependencies = [
   "cryptography>=42",
   "pydantic>=2.6",
   "mcp>=2.0",
+  # content indexing (on by default): extraction + in-house embeddings
+  "fastembed>=0.4", "pypdf>=4", "python-docx>=1.1", "openpyxl>=3.1", "python-pptx>=0.6",
 ]
 
 [project.optional-dependencies]
-content = ["fastembed>=0.4", "pypdf>=4", "python-docx>=1.1", "openpyxl>=3.1", "python-pptx>=0.6"]
+content = []  # kept for compatibility; content dependencies are now installed by default
 claude = ["anthropic>=1.0"]  # only if SUMMARY_PROVIDER=claude
 dev = ["pytest>=8", "pytest-asyncio>=0.23"]
 

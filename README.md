@@ -75,6 +75,8 @@ the PRD, and [agent/README.md](agent/README.md) for the local agent.
 
 ## Using it from Claude
 
+Step-by-step setup for Claude Code and Claude Desktop: [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md).
+
 Create one MCP session key per Claude session/client (web app → *MCP keys*, or
 `nous-drive create-key --admin-key … "Claude Desktop"`). Each key keeps its own "what's new" checkpoint.
 
@@ -133,7 +135,9 @@ NOUS_DRIVE_CONTENT_ENABLED=true
 #   install Ollama on the server, `ollama pull qwen2.5:3b`, then NOUS_DRIVE_SUMMARY_PROVIDER=ollama
 ```
 
-Then per source: `PATCH /api/sources/<id>/settings {"content": {"enabled": true, "extensions": [], "max_bytes": null, "skip_folders": ["/Archive"]}}`
+Content indexing is **on by default** (new sources get it automatically; extraction and embedding run as
+queued jobs after the file index; no LLM unless you choose one). To turn it off: `NOUS_DRIVE_CONTENT_ENABLED=false`,
+or per source `PATCH /api/sources/<id>/settings {"content": {"enabled": false}}`. To tune a source: `PATCH /api/sources/<id>/settings {"content": {"enabled": true, "extensions": [], "max_bytes": null, "skip_folders": ["/Archive"]}}`
 and `POST /api/sources/<id>/backfill-content`. Drive files are downloaded/exported by the server (needs the
 content scope); local files are extracted on the machine by the agent, which sends text only for files the
 server requests. Re-extraction happens only when the file's content hash changes; every version's text and

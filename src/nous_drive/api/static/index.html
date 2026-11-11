@@ -408,7 +408,8 @@ async function loadOverview() {
 
 /* ---------------------------------------------------------------- google drive */
 async function connectDrive(content, connectionId) {
-  const q = new URLSearchParams({content: !!content});
+  const q = new URLSearchParams();
+  if (content) q.set("content", "true");  // otherwise the server default applies (content access on)
   if (connectionId) q.set("connection_id", connectionId);
   const r = await api(`/api/oauth/google/start?${q}`); location.href = r.url;
 }
@@ -418,7 +419,7 @@ async function loadDrive() {
   const sel = await Promise.all(active.map(c => api(`/api/connections/${c.id}/selection`)));
   if (!active.length) {
     $("#drive-list").innerHTML = `<div class="card empty"><div class="big">🔗</div><h2>Connect a Google account</h2>
-      <p>Sign in with Google (read-only access to file names and folders). Your whole My Drive is indexed straight away; you can narrow it to specific folders or add shared drives.</p>
+      <p>Sign in with Google (read-only access; nothing in Drive is ever changed). Your whole My Drive is indexed straight away, including searchable text from documents; you can narrow it to specific folders or add shared drives.</p>
       <button class="btn" onclick="connectDrive(false)">Connect Google account</button></div>`;
     return busy;
   }

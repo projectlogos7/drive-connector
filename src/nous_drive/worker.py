@@ -23,7 +23,7 @@ def dispatch(job: dict) -> None:
     elif kind.startswith("drive_"):
         from .connectors.gdrive.sync import run_job
         run_job(job)
-    elif kind == "content_process":
+    elif kind in ("content_process", "content_embed"):
         from .content.pipeline import run_job
         run_job(job)
     elif kind == "rebuild_paths":

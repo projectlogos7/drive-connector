@@ -256,7 +256,7 @@ def _delete_source(ident: dict, source_id: str, revoke_if_last: bool) -> None:
 
 # ---- Google Drive connect flow
 @app.get("/api/oauth/google/start")
-def google_start(content: bool = False, connection_id: str | None = None, ident: dict = Depends(admin)) -> dict:
+def google_start(content: bool | None = None, connection_id: str | None = None, ident: dict = Depends(admin)) -> dict:
     from ..connectors.gdrive.auth import authorization_url
     try:
         return {"url": authorization_url(ident["account_id"], content=content, connection_id=connection_id)}

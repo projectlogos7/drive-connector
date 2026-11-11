@@ -24,8 +24,10 @@ def phase_scopes(content: bool = False) -> list[str]:
     return [SCOPE_READONLY if content else SCOPE_METADATA, "openid", "email"]
 
 
-def authorization_url(account_id: UUID | str, content: bool = False, connection_id: str | None = None) -> str:
+def authorization_url(account_id: UUID | str, content: bool | None = None, connection_id: str | None = None) -> str:
     s = get_settings()
+    if content is None:
+        content = s.content_enabled  # Phase 2 is on by default, so ask for read-only content access up front
     if not s.google_client_id:
         raise RuntimeError("NOUS_DRIVE_GOOGLE_CLIENT_ID is not configured")
     state = sign_state({"a": str(account_id), "c": content, "conn": connection_id})

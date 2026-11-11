@@ -99,3 +99,38 @@ def test_store_text_rejects_stale(account, content_on):
     from nous_drive.content.pipeline import ContentError
     with pytest.raises(ContentError):
         store_text(account["id"], nid, "text", "t", expected_hash="something-else")
+
+
+def test_phase2_on_by_default_with_queued_embedding_and_no_llm(account, monkeypatch):
+    from nous_drive.config import get_settings
+    from nous_drive.worker import run_one
+    monkeypatch.delenv("NOUS_DRIVE_CONTENT_ENABLED", raising=False)
+    monkeypatch.delenv("NOUS_DRIVE_SUMMARY_PROVIDER", raising=False)
+    reset_settings()
+    s = get_settings()
+    assert s.content_enabled and s.summary_provider == "extractive"
+    fake = FakeDrive()
+    install(monkeypatch, fake)
+    fake.add("PROJ", "Projects", fake.root_id, folder=True, record=False)
+    fake.add("t", "notes.txt", "PROJ", record=False, _content=b"Shooting schedule for Madarasa episode two.")
+    with db.scoped(account["id"]) as conn:
+        cid = conn.execute("INSERT INTO drive_index.drive_connections (account_id) VALUES (%s) RETURNING id",
+                           (account["id"],)).fetchone()["id"]
+    src = make_source(account["id"], root_ref="PROJ", connection_id=cid)  # no content settings given
+    with db.scoped(account["id"]) as conn:
+        queue.enqueue(conn, account["id"], "drive_initial_crawl", src["id"])
+    order = []
+    while True:
+        jobs = queue.claim(1)
+        if not jobs:
+            break
+        order.append(jobs[0]["kind"])
+        run_one(jobs[0])
+    assert order == ["drive_initial_crawl", "content_process", "content_embed"]
+    n = nodes(account["id"])["t"]
+    with db.scoped(account["id"]) as conn:
+        emb = conn.execute("SELECT DISTINCT model FROM drive_index.embeddings").fetchall()
+        summ = conn.execute("SELECT model FROM drive_index.summaries WHERE node_id = %s", (n["id"],)).fetchone()
+    assert n["content_status"] == "extracted"
+    assert emb and summ["model"] == "extractive"   # no LLM used
+    assert T.search_files(T.Ctx(account_id=account["id"]), "schedule Madarasa", mode="content")["results"]

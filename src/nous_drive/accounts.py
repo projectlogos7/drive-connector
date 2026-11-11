@@ -20,7 +20,7 @@ SOURCE_STATUSES = ("connecting", "initial_scan", "live", "degraded", "paused", "
 DEFAULT_SOURCE_SETTINGS: dict[str, Any] = {
     "ignore": [],
     "notifications": {"enabled": True, "types": ["added"], "quiet_folders": []},
-    "content": {"enabled": False, "extensions": [], "max_bytes": None, "skip_folders": []},
+    "content": {"enabled": True, "extensions": [], "max_bytes": None, "skip_folders": []},
 }
 
 

@@ -78,7 +78,7 @@ class Settings:
     notify_email_to: str | None = field(default_factory=lambda: _env("NOTIFY_EMAIL_TO"))
 
     # Phase 2 (content)
-    content_enabled: bool = field(default_factory=lambda: _bool("CONTENT_ENABLED", False))
+    content_enabled: bool = field(default_factory=lambda: _bool("CONTENT_ENABLED", True))
     content_max_bytes: int = field(default_factory=lambda: _int("CONTENT_MAX_BYTES", 50 * 1024 * 1024))
     content_max_chars: int = field(default_factory=lambda: _int("CONTENT_MAX_CHARS", 2_000_000))
     embedding_provider: str = field(default_factory=lambda: _env("EMBEDDING_PROVIDER", "fastembed"))

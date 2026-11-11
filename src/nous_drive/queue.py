@@ -27,6 +27,7 @@ PRIORITY = {
     "drive_reconcile": 60,
     "rebuild_paths": 60,
     "content_process": 90,
+    "content_embed": 95,
 }
 
 
@@ -58,8 +59,9 @@ def claim(limit: int = 1, kinds: list[str] | None = None) -> list[dict]:
                    AND (%s::text[] IS NULL OR c.kind = ANY(%s::text[]))
                    AND (c.source_id IS NULL OR NOT EXISTS (
                          SELECT 1 FROM drive_index.index_jobs r
-                         WHERE r.source_id = c.source_id AND r.status = 'running' AND r.kind <> 'content_process'
-                           AND c.kind <> 'content_process'))
+                         WHERE r.source_id = c.source_id AND r.status = 'running'
+                           AND r.kind NOT IN ('content_process','content_embed')
+                           AND c.kind NOT IN ('content_process','content_embed')))
                  ORDER BY c.priority, c.id
                  FOR UPDATE SKIP LOCKED
                  LIMIT %s)

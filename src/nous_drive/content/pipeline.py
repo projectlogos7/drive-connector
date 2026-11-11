@@ -37,13 +37,12 @@ def _fetch_drive_bytes(account_id, source: dict, node: dict) -> tuple[bytes, str
 
 
 def store_text(account_id, node_id: str, text: str, extractor: str, expected_hash: str | None = None) -> dict:
-    """Persist extracted text for a node and (re)build chunks, embeddings and summary."""
+    """Persist extracted text and its chunks, then queue a ``content_embed`` job for embeddings + summary."""
+    from .. import queue
     s = get_settings()
     truncated = len(text) > s.content_max_chars
     text = text[: s.content_max_chars]
     chunks = chunk_text(text)
-    embedder = get_embedder()
-    vectors = embedder.embed(chunks, "document") if chunks else []
     with db.scoped(account_id) as conn:
         node = conn.execute("SELECT * FROM drive_index.nodes WHERE id = %s FOR UPDATE", (node_id,)).fetchone()
         if not node:
@@ -59,31 +58,64 @@ def store_text(account_id, node_id: str, text: str, extractor: str, expected_has
              text, len(text), truncated),
         )
         conn.execute("DELETE FROM drive_index.chunks WHERE node_id = %s", (node_id,))
-        for i, (chunk, vec) in enumerate(zip(chunks, vectors)):
-            cid = conn.execute(
-                """INSERT INTO drive_index.chunks (node_id, content_version, account_id, source_id, ord, text)
-                   VALUES (%s,%s,%s,%s,%s,%s) RETURNING id""",
-                (node_id, version, str(account_id), node["source_id"], i, chunk),
-            ).fetchone()["id"]
+        for i, chunk in enumerate(chunks):
             conn.execute(
-                """INSERT INTO drive_index.embeddings (chunk_id, account_id, node_id, model, embedding)
-                   VALUES (%s,%s,%s,%s,%s::vector)""",
-                (cid, str(account_id), node_id, embedder.name, to_pgvector(vec)),
+                """INSERT INTO drive_index.chunks (node_id, content_version, account_id, source_id, ord, text)
+                   VALUES (%s,%s,%s,%s,%s,%s)""",
+                (node_id, version, str(account_id), node["source_id"], i, chunk),
             )
         conn.execute(
             """UPDATE drive_index.nodes SET content_status = 'extracted', content_version = %s, content_error = NULL
                WHERE id = %s""",
             (version, node_id),
         )
-    summary, model = summarize(text, node["name"], node["path"]) if text.strip() else ("(empty file)", "none")
+        queue.enqueue(conn, account_id, "content_embed", node["source_id"],
+                      {"node_id": node_id, "content_version": version}, dedupe_key=f"embed:{node_id}")
+    return {"node_id": node_id, "content_version": version, "chunks": len(chunks)}
+
+
+def embed_node(account_id, node_id: str) -> dict:
+    """content_embed job: embed the current version's chunks (in-house model by default) and summarise."""
+    embedder = get_embedder()
     with db.scoped(account_id) as conn:
-        conn.execute(
-            """INSERT INTO drive_index.summaries (node_id, content_version, account_id, summary, model)
-               VALUES (%s,%s,%s,%s,%s) ON CONFLICT (node_id, content_version) DO UPDATE
-               SET summary = EXCLUDED.summary, model = EXCLUDED.model""",
-            (node_id, version, str(account_id), summary, model),
-        )
-    return {"node_id": node_id, "content_version": version, "chunks": len(chunks), "summary_model": model}
+        node = conn.execute("SELECT * FROM drive_index.nodes WHERE id = %s", (node_id,)).fetchone()
+        if not node or node["content_status"] != "extracted":
+            return {"skipped": True}
+        version = node["content_version"]
+        chunks = conn.execute(
+            """SELECT c.id, c.text FROM drive_index.chunks c LEFT JOIN drive_index.embeddings e
+                 ON e.chunk_id = c.id AND e.model = %s
+               WHERE c.node_id = %s AND c.content_version = %s AND e.chunk_id IS NULL ORDER BY c.ord""",
+            (embedder.name, node_id, version),
+        ).fetchall()
+        fc = conn.execute("SELECT text FROM drive_index.file_contents WHERE node_id = %s AND content_version = %s",
+                          (node_id, version)).fetchone()
+        has_summary = conn.execute("SELECT 1 FROM drive_index.summaries WHERE node_id = %s AND content_version = %s",
+                                   (node_id, version)).fetchone()
+    vectors = embedder.embed([c["text"] for c in chunks], "document") if chunks else []
+    text = fc["text"] if fc else ""
+    summary = None
+    if not has_summary:
+        summary = summarize(text, node["name"], node["path"]) if text.strip() else ("(empty file)", "none")
+    with db.scoped(account_id) as conn:
+        current = conn.execute("SELECT content_version FROM drive_index.nodes WHERE id = %s", (node_id,)).fetchone()
+        if not current or current["content_version"] != version:
+            return {"skipped": "newer version arrived"}  # its own embed job will run
+        for c, v in zip(chunks, vectors):
+            conn.execute(
+                """INSERT INTO drive_index.embeddings (chunk_id, account_id, node_id, model, embedding)
+                   VALUES (%s,%s,%s,%s,%s::vector) ON CONFLICT (chunk_id) DO UPDATE
+                   SET model = EXCLUDED.model, embedding = EXCLUDED.embedding""",
+                (c["id"], str(account_id), node_id, embedder.name, to_pgvector(v)),
+            )
+        if summary:
+            conn.execute(
+                """INSERT INTO drive_index.summaries (node_id, content_version, account_id, summary, model)
+                   VALUES (%s,%s,%s,%s,%s) ON CONFLICT (node_id, content_version) DO UPDATE
+                   SET summary = EXCLUDED.summary, model = EXCLUDED.model""",
+                (node_id, version, str(account_id), summary[0], summary[1]),
+            )
+    return {"embedded": len(chunks), "model": embedder.name}
 
 
 def mark_failed(account_id, node_id: str, error: str, status: str = "failed") -> None:
@@ -97,6 +129,9 @@ def mark_failed(account_id, node_id: str, error: str, status: str = "failed") ->
 def run_job(job: dict) -> None:
     """content_process job (Drive sources). Local sources upload text through the agent API instead."""
     account_id, node_id = job["account_id"], job["payload"]["node_id"]
+    if job["kind"] == "content_embed":
+        embed_node(account_id, node_id)
+        return
     with db.scoped(account_id) as conn:
         node = conn.execute("SELECT * FROM drive_index.nodes WHERE id = %s", (node_id,)).fetchone()
         source = conn.execute("SELECT * FROM drive_index.sources WHERE id = %s", (job["source_id"],)).fetchone()

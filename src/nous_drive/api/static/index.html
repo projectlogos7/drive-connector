@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nous Drive Connectors</title>
+<style>
+  :root { --bg:#f7f7f5; --card:#fff; --ink:#1c1c1a; --muted:#6b6b66; --line:#e3e2dd; --accent:#2f5d50;
+          --ok:#2e7d32; --warn:#b26a00; --bad:#b3261e; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#141413; --card:#1e1e1c; --ink:#ecebe6; --muted:#9a9993;
+          --line:#33332f; --accent:#7fbfa9; } }
+  * { box-sizing: border-box; }
+  body { margin:0; font:15px/1.5 system-ui, -apple-system, Segoe UI, sans-serif; background:var(--bg); color:var(--ink); }
+  header { display:flex; align-items:center; gap:16px; padding:14px 20px; border-bottom:1px solid var(--line); flex-wrap:wrap; }
+  header h1 { font-size:17px; margin:0; font-weight:600; }
+  nav a { margin-right:14px; color:var(--muted); text-decoration:none; cursor:pointer; }
+  nav a.on { color:var(--ink); font-weight:600; }
+  main { max-width:1080px; margin:0 auto; padding:20px 16px 60px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; margin-bottom:16px; overflow-x:auto; }
+  table { width:100%; border-collapse:collapse; font-size:14px; }
+  th, td { text-align:left; padding:7px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--muted); font-weight:500; }
+  button, .btn { background:var(--accent); color:#fff; border:0; border-radius:7px; padding:6px 12px; cursor:pointer; font:inherit; font-size:14px; }
+  button.ghost { background:transparent; color:var(--ink); border:1px solid var(--line); }
+  button.danger { background:var(--bad); }
+  input, select { font:inherit; padding:6px 8px; border:1px solid var(--line); border-radius:7px; background:var(--card); color:var(--ink); }
+  .pill { display:inline-block; padding:1px 8px; border-radius:20px; font-size:12px; border:1px solid var(--line); }
+  .live { color:var(--ok); border-color:var(--ok); } .degraded,.initial_scan,.connecting { color:var(--warn); border-color:var(--warn); }
+  .error { color:var(--bad); border-color:var(--bad); } .paused { color:var(--muted); }
+  .muted { color:var(--muted); font-size:13px; }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size:13px; }
+  pre { white-space:pre-wrap; background:var(--bg); padding:10px; border-radius:7px; }
+  .hidden { display:none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Nous Drive Connectors</h1>
+  <nav id="nav">
+    <a data-tab="sources">Sources</a><a data-tab="connect-drive">Connect Drive</a><a data-tab="devices">Devices</a>
+    <a data-tab="keys">MCP keys</a><a data-tab="notifications">Notifications</a><a data-tab="changes">Changes</a>
+  </nav>
+  <span style="flex:1"></span>
+  <button class="ghost" id="logout">Sign out</button>
+</header>
+<main>
+  <section id="login" class="card hidden">
+    <h2>Sign in</h2>
+    <p class="muted">Paste your admin key (created with <code>nous-drive create-account</code>).</p>
+    <div class="row"><input id="key" type="password" size="50" placeholder="nd_admin_…"><button id="signin">Sign in</button></div>
+  </section>
+
+  <section data-panel="sources" class="hidden">
+    <div class="card"><div class="row" style="justify-content:space-between"><h2 style="margin:0">Sources</h2>
+      <button class="ghost" onclick="loadSources()">Refresh</button></div>
+      <table><thead><tr><th>Name</th><th>Type</th><th>Status</th><th>Indexed</th><th>Progress / health</th><th></th></tr></thead>
+      <tbody id="sources"></tbody></table></div>
+  </section>
+
+  <section data-panel="connect-drive" class="hidden">
+    <div class="card">
+      <h2>Connect Google Drive</h2>
+      <p class="muted">Sign in with Google (metadata-only access), then pick any mix of My Drive, folders and shared drives.</p>
+      <div class="row"><button onclick="startOAuth(false)">Connect a Google account</button>
+        <button class="ghost" onclick="startOAuth(true)">Connect with content access (Phase 2)</button></div>
+    </div>
+    <div class="card" id="connections-card"><h3>Connected Google accounts</h3><div id="connections"></div></div>
+    <div class="card hidden" id="picker">
+      <h3>Choose what to watch</h3>
+      <div id="picker-roots"></div>
+      <div class="muted" id="crumbs"></div>
+      <div id="picker-folders"></div>
+      <p><button onclick="createSources()">Index and watch selected</button> <span id="picked" class="muted"></span></p>
+    </div>
+  </section>
+
+  <section data-panel="devices" class="hidden">
+    <div class="card"><h2>Pair a computer</h2>
+      <p class="muted">Install Nous Sync on the computer, then run the command shown.</p>
+      <div class="row"><input id="devname" placeholder="Device name, e.g. Nous MacBook Pro" size="36"><button onclick="pair()">Create pairing code</button></div>
+      <pre id="paircode" class="hidden"></pre></div>
+    <div class="card"><h3>Devices</h3><table><thead><tr><th>Name</th><th>OS</th><th>Agent</th><th>Last seen</th><th></th></tr></thead><tbody id="devices"></tbody></table></div>
+  </section>
+
+  <section data-panel="keys" class="hidden">
+    <div class="card"><h2>MCP session keys</h2>
+      <p class="muted">Each Claude session or MCP client gets its own key, so "what's new" checkpoints are kept per session.</p>
+      <div class="row"><input id="keyname" placeholder="e.g. Claude Desktop – laptop" size="36"><button onclick="newKey()">Create key</button></div>
+      <pre id="newkey" class="hidden"></pre>
+      <table><thead><tr><th>Name</th><th>Kind</th><th>Prefix</th><th>Last used</th><th></th></tr></thead><tbody id="keys"></tbody></table></div>
+  </section>
+
+  <section data-panel="notifications" class="hidden"><div class="card"><h2>Notifications</h2><div id="notifs"></div></div></section>
+  <section data-panel="changes" class="hidden"><div class="card"><h2>Changes (last 24h)</h2>
+    <table><thead><tr><th>When</th><th>Type</th><th>Path</th><th>Source</th></tr></thead><tbody id="changes"></tbody></table></div></section>
+</main>
+<script>
+let KEY = null; try { KEY = localStorage.getItem("nd_key"); } catch (e) {}
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const when = (t) => t ? new Date(t).toLocaleString() : "—";
+async function api(path, opts = {}) {
+  const r = await fetch(path, {...opts, headers: {"Authorization": "Bearer " + KEY, "Content-Type": "application/json", ...(opts.headers||{})}});
+  if (r.status === 401) { showLogin(); throw new Error("unauthorised"); }
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok) { alert(body.detail || r.statusText); throw new Error(body.detail); }
+  return body;
+}
+function showLogin() { $("#login").classList.remove("hidden"); document.querySelectorAll("[data-panel]").forEach(p => p.classList.add("hidden")); }
+$("#signin").onclick = async () => { KEY = $("#key").value.trim(); try { localStorage.setItem("nd_key", KEY); } catch (e) {} $("#login").classList.add("hidden"); route(); };
+$("#logout").onclick = () => { try { localStorage.removeItem("nd_key"); } catch (e) {} KEY = null; showLogin(); };
+document.querySelectorAll("#nav a").forEach(a => a.onclick = () => { location.hash = a.dataset.tab; });
+window.addEventListener("hashchange", route);
+
+function route() {
+  if (!KEY) return showLogin();
+  const h = location.hash.slice(1);
+  if (h.startsWith("pick-roots=")) { show("connect-drive"); return openPicker(h.split("=")[1]); }
+  if (h.startsWith("error=")) alert("Google sign-in failed: " + h.split("=")[1]);
+  const tab = ["sources","connect-drive","devices","keys","notifications","changes"].includes(h) ? h : "sources";
+  show(tab);
+  ({sources: loadSources, "connect-drive": loadConnections, devices: loadDevices, keys: loadKeys,
+    notifications: loadNotifs, changes: loadChanges})[tab]();
+}
+function show(tab) {
+  document.querySelectorAll("[data-panel]").forEach(p => p.classList.toggle("hidden", p.dataset.panel !== tab));
+  document.querySelectorAll("#nav a").forEach(a => a.classList.toggle("on", a.dataset.tab === tab));
+}
+
+async function loadSources() {
+  const [list, st] = await Promise.all([api("/api/sources"), api("/api/status")]);
+  const health = Object.fromEntries(st.sources.map(s => [s.source_id, s]));
+  $("#sources").innerHTML = list.sources.map(s => {
+    const h = health[s.id] || {}; const p = h.scan_progress || {};
+    let prog = p.state === "running" ? `Scanning… ${p.folders||0} folders, ${p.files||0} files` :
+               (h.lag_seconds != null ? `synced ${Math.round(h.lag_seconds/60)} min ago` : "");
+    if (h.device) prog += ` · ${h.device.online ? "device online" : "device offline"}`;
+    if (h.push_channel) prog += h.push_channel.active ? " · push on" : " · polling";
+    if (h.queue && h.queue.dead_letter) prog += ` · <span class="error">${h.queue.dead_letter} failed jobs</span>`;
+    if (s.status_reason) prog += `<br><span class="muted">${esc(s.status_reason)}</span>`;
+    const paused = s.status === "paused";
+    return `<tr><td><b>${esc(s.name)}</b><br><span class="muted">${esc(s.device || s.root_kind)}</span></td>
+      <td>${s.type === "gdrive" ? "Google Drive" : "Local folder"}</td>
+      <td><span class="pill ${s.status}">${s.status}</span></td>
+      <td>${s.files} files<br><span class="muted">${s.folders} folders · ${s.total_size}</span></td>
+      <td>${prog}</td>
+      <td class="row"><button class="ghost" onclick="act('${s.id}','${paused ? "resume" : "pause"}')">${paused ? "Resume" : "Pause"}</button>
+        <button class="ghost" onclick="act('${s.id}','resync')">Resync</button>
+        <button class="ghost" onclick="toggleNotif('${s.id}')">Notifications</button>
+        <button class="danger" onclick="removeSource('${s.id}','${esc(s.name)}')">Remove</button></td></tr>`;
+  }).join("") || `<tr><td colspan=6 class="muted">No sources yet. Connect a Drive or pair a computer.</td></tr>`;
+}
+async function act(id, a) { await api(`/api/sources/${id}/${a}`, {method: "POST"}); loadSources(); }
+async function removeSource(id, name) { if (confirm(`Remove "${name}"? Its index rows are deleted and tokens revoked.`)) { await api(`/api/sources/${id}`, {method:"DELETE"}); loadSources(); } }
+async function toggleNotif(id) {
+  const on = confirm("Send notifications for this source? (OK = on, Cancel = off)");
+  const types = on ? (prompt("Change types to notify (comma separated): added, modified, moved, deleted", "added") || "added") : "added";
+  await api(`/api/sources/${id}/settings`, {method: "PATCH", body: JSON.stringify({notifications: {enabled: on, types: types.split(",").map(t => t.trim()).filter(Boolean)}})});
+}
+
+async function startOAuth(content) { const r = await api(`/api/oauth/google/start?content=${content}`); location.href = r.url; }
+async function loadConnections() {
+  const r = await api("/api/connections");
+  $("#connections").innerHTML = r.connections.filter(c => !c.revoked_at).map(c =>
+    `<div class="row" style="margin:6px 0"><b>${esc(c.google_email || c.id)}</b><span class="muted">${c.scopes.some(s => s.endsWith("drive.readonly")) ? "content access" : "metadata only"}</span>
+     <button class="ghost" onclick="location.hash='pick-roots=${c.id}'">Add roots</button></div>`).join("") || `<span class="muted">None yet.</span>`;
+}
+let PICK = {conn: null, chosen: new Map(), stack: []};
+async function openPicker(conn) {
+  PICK = {conn, chosen: new Map(), stack: []};
+  $("#picker").classList.remove("hidden");
+  const r = await api(`/api/connections/${conn}/roots`);
+  const roots = [r.my_drive, ...r.shared_drives];
+  $("#picker-roots").innerHTML = roots.map(x => `<div class="row" style="margin:4px 0"><label><input type="checkbox" data-root='${esc(JSON.stringify(x))}' onchange="pickToggle(this)"> ${esc(x.name)}</label>
+     <span class="muted">${x.kind === "my_drive" ? "My Drive" : "shared drive"}</span>
+     <button class="ghost" onclick='browse(${JSON.stringify(x.id)}, ${JSON.stringify(x.name)}, true)'>Browse folders</button></div>`).join("");
+  $("#picker-folders").innerHTML = ""; updatePicked();
+}
+async function browse(id, name, reset) {
+  if (reset) PICK.stack = [];
+  PICK.stack.push({id, name});
+  $("#crumbs").innerHTML = PICK.stack.map((s, i) => `<a style="cursor:pointer" onclick="back(${i})">${esc(s.name)}</a>`).join(" / ");
+  const r = await api(`/api/connections/${PICK.conn}/roots?parent=${encodeURIComponent(id)}`);
+  $("#picker-folders").innerHTML = r.folders.map(f => `<div class="row" style="margin:3px 0 3px 12px"><label><input type="checkbox" data-root='${esc(JSON.stringify(f))}' ${PICK.chosen.has(f.id) ? "checked" : ""} onchange="pickToggle(this)"> 📁 ${esc(f.name)}</label>
+     <button class="ghost" onclick='browse(${JSON.stringify(f.id)}, ${JSON.stringify(f.name)})'>Open</button></div>`).join("") || `<div class="muted">No subfolders.</div>`;
+}
+function back(i) { const s = PICK.stack[i]; PICK.stack = PICK.stack.slice(0, i); browse(s.id, s.name); }
+function pickToggle(el) { const r = JSON.parse(el.dataset.root); el.checked ? PICK.chosen.set(r.id, r) : PICK.chosen.delete(r.id); updatePicked(); }
+function updatePicked() { $("#picked").textContent = PICK.chosen.size ? `${PICK.chosen.size} selected: ` + [...PICK.chosen.values()].map(r => r.name).join(", ") : ""; }
+async function createSources() {
+  if (!PICK.chosen.size) return alert("Select at least one root");
+  const r = await api(`/api/connections/${PICK.conn}/sources`, {method: "POST", body: JSON.stringify({roots: [...PICK.chosen.values()]})});
+  alert(`Added ${r.created.length} source(s). The first full index starts now.`); location.hash = "sources";
+}
+
+async function pair() {
+  const r = await api("/api/devices/pairing-codes", {method: "POST", body: JSON.stringify({name: $("#devname").value || null})});
+  $("#paircode").classList.remove("hidden");
+  $("#paircode").textContent = `Pairing code: ${r.code} (valid ${r.expires_in_minutes} minutes)\n\n${r.instructions}\nnous-sync add ~/Footage`;
+}
+async function loadDevices() {
+  const r = await api("/api/devices");
+  $("#devices").innerHTML = r.devices.map(d => `<tr><td><b>${esc(d.name)}</b><br><span class="muted">${esc(d.hostname)}</span></td><td>${esc(d.os)}</td>
+    <td>${esc(d.agent_version)}</td><td>${d.revoked_at ? '<span class="pill error">revoked</span>' : (d.online ? '<span class="pill live">online</span>' : when(d.last_seen_at))}</td>
+    <td class="row"><button class="ghost" onclick="renameDevice('${d.id}','${esc(d.name)}')">Rename</button>${d.revoked_at ? "" : `<button class="danger" onclick="revokeDevice('${d.id}')">Revoke</button>`}</td></tr>`).join("");
+}
+async function renameDevice(id, name) { const n = prompt("Device name", name); if (n) { await api(`/api/devices/${id}`, {method: "PATCH", body: JSON.stringify({name: n})}); loadDevices(); } }
+async function revokeDevice(id) { if (confirm("Revoke this device's token?")) { await api(`/api/devices/${id}`, {method: "DELETE"}); loadDevices(); } }
+
+async function newKey() {
+  const r = await api("/api/keys", {method: "POST", body: JSON.stringify({name: $("#keyname").value || "MCP session", kind: "session"})});
+  $("#newkey").classList.remove("hidden"); $("#newkey").textContent = `${r.key}\n\n(${r.note})`; loadKeys();
+}
+async function loadKeys() {
+  const r = await api("/api/keys");
+  $("#keys").innerHTML = r.keys.map(k => `<tr><td>${esc(k.name)}</td><td>${k.kind}</td><td><code>${esc(k.key_prefix)}…</code></td><td>${when(k.last_used_at)}</td>
+    <td>${k.revoked_at ? '<span class="pill error">revoked</span>' : `<button class="ghost" onclick="revokeKey('${k.id}')">Revoke</button>`}</td></tr>`).join("");
+}
+async function revokeKey(id) { if (confirm("Revoke this key?")) { await api(`/api/keys/${id}`, {method: "DELETE"}); loadKeys(); } }
+async function loadNotifs() {
+  const r = await api("/api/notifications");
+  $("#notifs").innerHTML = r.notifications.map(n => `<div style="border-bottom:1px solid var(--line);padding:8px 0"><b>${esc(n.title)}</b> <span class="pill ${n.kind === "alert" ? "error" : ""}">${n.kind}</span>
+    <span class="muted">${when(n.created_at)}</span><pre>${esc(n.body)}</pre></div>`).join("") || `<span class="muted">Nothing yet.</span>`;
+}
+async function loadChanges() {
+  const r = await api("/api/changes?since=24h&limit=200");
+  $("#changes").innerHTML = r.changes.map(c => `<tr><td>${when(c.detected_at)}</td><td>${c.type}</td><td>${esc(c.path)}${c.from ? `<br><span class="muted">from ${esc(c.from)}</span>` : ""}</td><td>${esc(c.source)}${c.device ? ` · ${esc(c.device)}` : ""}</td></tr>`).join("");
+}
+route();
+</script>
+</body>
+</html>

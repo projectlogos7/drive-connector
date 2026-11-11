@@ -38,8 +38,117 @@ def create_account(name: str, email: str | None = None, org_id: str | None = Non
         ).fetchone()
     with db.scoped(acct["id"]) as conn:
         key = issue_key(conn, acct["id"], "admin", "initial admin key")
+        if email:
+            add_member(conn, acct["id"], email, name=name, role="admin", actor="system")
         audit(conn, acct["id"], "system", "account.created", str(acct["id"]), {"name": name})
     return acct, key
+
+
+def normalize_email(email: str) -> str:
+    return email.strip().lower()
+
+
+def add_member(conn: Connection, account_id, email: str, *, name: str | None = None,
+               role: str = "admin", actor: str = "admin") -> dict:
+    email = normalize_email(email)
+    if "@" not in email:
+        raise ValueError("invalid email")
+    if role not in ("admin", "member"):
+        raise ValueError("role must be admin or member")
+    row = conn.execute(
+        """INSERT INTO drive_index.members (account_id, email, name, role)
+           VALUES (%s,%s,%s,%s)
+           ON CONFLICT (account_id, email) DO UPDATE
+             SET name = COALESCE(EXCLUDED.name, drive_index.members.name),
+                 role = EXCLUDED.role,
+                 deactivated_at = NULL
+           RETURNING *""",
+        (str(account_id), email, name, role),
+    ).fetchone()
+    audit(conn, account_id, actor, "member.added", str(row["id"]), {"email": email, "role": role})
+    return row
+
+
+def list_members(conn: Connection) -> list[dict]:
+    return conn.execute(
+        """SELECT id, email, name, role, created_at, deactivated_at
+           FROM drive_index.members ORDER BY created_at"""
+    ).fetchall()
+
+
+def deactivate_member(conn: Connection, account_id, member_id, actor: str) -> None:
+    conn.execute(
+        "UPDATE drive_index.members SET deactivated_at = now() WHERE id = %s AND deactivated_at IS NULL",
+        (str(member_id),),
+    )
+    audit(conn, account_id, actor, "member.deactivated", str(member_id))
+
+
+def find_active_members_by_email(email: str) -> list[dict]:
+    """System lookup: every active membership for this address (for magic-link)."""
+    email = normalize_email(email)
+    with db.system() as conn:
+        return conn.execute(
+            """SELECT m.*, a.name AS account_name
+               FROM drive_index.members m
+               JOIN drive_index.accounts a ON a.id = m.account_id
+               WHERE lower(m.email) = %s AND m.deactivated_at IS NULL
+               ORDER BY m.created_at""",
+            (email,),
+        ).fetchall()
+
+
+def create_login_token(member: dict, ttl_minutes: int = 30) -> str:
+    """Create a one-time login token; return the raw secret (shown once / emailed)."""
+    raw = secrets.token_urlsafe(32)
+    with db.system() as conn:
+        conn.execute(
+            """INSERT INTO drive_index.login_tokens
+                 (account_id, member_id, email, token_hash, expires_at)
+               VALUES (%s,%s,%s,%s,%s)""",
+            (str(member["account_id"]), str(member["id"]), member["email"],
+             hash_key(raw), utcnow() + timedelta(minutes=ttl_minutes)),
+        )
+    return raw
+
+
+def redeem_login_token(token: str) -> tuple[dict, str]:
+    """Mark a login token used and issue a fresh admin web key. Returns (member, key)."""
+    if not token or len(token) < 10:
+        raise AuthError("invalid sign-in link")
+    with db.system() as conn:
+        row = conn.execute(
+            """SELECT * FROM drive_index.login_tokens
+               WHERE token_hash = %s AND used_at IS NULL AND expires_at > now()
+               FOR UPDATE""",
+            (hash_key(token),),
+        ).fetchone()
+        if not row:
+            raise AuthError("That sign-in link has expired or was already used")
+        member = conn.execute(
+            "SELECT * FROM drive_index.members WHERE id = %s AND deactivated_at IS NULL",
+            (row["member_id"],),
+        ).fetchone()
+        if not member:
+            raise AuthError("That sign-in link has expired or was already used")
+        updated = conn.execute(
+            "UPDATE drive_index.login_tokens SET used_at = now() WHERE id = %s AND used_at IS NULL RETURNING id",
+            (row["id"],),
+        ).fetchone()
+        if not updated:
+            raise AuthError("That sign-in link has expired or was already used")
+        account_id = member["account_id"]
+        email = member["email"]
+    with db.scoped(account_id) as conn:
+        # One durable web key per email: revoke prior web sessions for this member.
+        conn.execute(
+            """UPDATE drive_index.api_keys SET revoked_at = now()
+               WHERE account_id = %s AND kind = 'admin' AND name = %s AND revoked_at IS NULL""",
+            (str(account_id), f"web:{email}"),
+        )
+        key = issue_key(conn, account_id, "admin", f"web:{email}")
+        audit(conn, account_id, f"member:{member['id']}", "auth.login", str(member["id"]), {"email": email})
+    return member, key
 
 
 def issue_key(conn: Connection, account_id, kind: str, name: str, device_id=None) -> str:

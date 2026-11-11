@@ -81,6 +81,86 @@ def web_app() -> str:
     return resources.files("nous_drive.api.static").joinpath("index.html").read_text()
 
 
+# ------------------------------------------------------------------ email magic-link auth
+class RequestLink(BaseModel):
+    email: str
+
+
+@app.post("/api/auth/request-link")
+def request_link(body: RequestLink) -> dict:
+    """Email a one-time sign-in link. Same response whether or not the address is known."""
+    from ..mail import send_sign_in
+    email = accounts.normalize_email(body.email)
+    if "@" not in email:
+        raise HTTPException(400, "invalid email")
+    s = get_settings()
+    members = accounts.find_active_members_by_email(email)
+    links: list[dict] = []
+    for m in members:
+        raw = accounts.create_login_token(m)
+        url = f"{s.public_base_url.rstrip('/')}/auth/email/callback?token={raw}"
+        if s.dev_links:
+            log.info("dev sign-in link for %s (%s): %s", email, m["account_name"], url)
+        send_sign_in(email, m["account_name"] or "Nous Drive", url)
+        links.append({"account": m["account_name"], "url": url})
+    out: dict[str, Any] = {"sent": True}
+    if s.dev_links:
+        out["dev_links"] = links
+    return out
+
+
+@app.get("/auth/email/callback", include_in_schema=False)
+def email_callback(token: str | None = None):
+    """Redeem a magic link and hand the browser an admin web key via the hash."""
+    try:
+        member, key = accounts.redeem_login_token(token or "")
+    except AuthError as e:
+        return RedirectResponse(f"/app#error={str(e)}")
+    # Key goes in the hash so it never hits server access logs as a query param again.
+    return RedirectResponse(f"/app#session={key}")
+
+
+class InviteMember(BaseModel):
+    email: str
+    name: str | None = None
+    role: str = Field("admin", pattern="^(admin|member)$")
+    send_invite: bool = True
+
+
+@app.get("/api/members")
+def members(ident: dict = Depends(admin)) -> dict:
+    with db.scoped(ident["account_id"]) as conn:
+        return {"members": accounts.list_members(conn)}
+
+
+@app.post("/api/members")
+def invite_member(body: InviteMember, ident: dict = Depends(admin)) -> dict:
+    from ..mail import send_sign_in
+    s = get_settings()
+    with db.scoped(ident["account_id"]) as conn:
+        member = accounts.add_member(
+            conn, ident["account_id"], body.email, name=body.name, role=body.role,
+            actor=f"key:{ident['key_id']}",
+        )
+        acct = conn.execute("SELECT name FROM drive_index.accounts WHERE id = %s",
+                            (str(ident["account_id"]),)).fetchone()
+    out: dict[str, Any] = {"member": {k: member[k] for k in ("id", "email", "name", "role", "created_at")}}
+    if body.send_invite:
+        raw = accounts.create_login_token(member)
+        url = f"{s.public_base_url.rstrip('/')}/auth/email/callback?token={raw}"
+        send_sign_in(member["email"], (acct or {}).get("name") or "Nous Drive", url)
+        out["invite_sent"] = True
+        if s.dev_links:
+            out["dev_link"] = url
+    return out
+
+
+@app.delete("/api/members/{member_id}")
+def remove_member(member_id: str, ident: dict = Depends(admin)) -> dict:
+    with db.scoped(ident["account_id"]) as conn:
+        accounts.deactivate_member(conn, ident["account_id"], member_id, f"key:{ident['key_id']}")
+    return {"deactivated": member_id}
+
 @app.get("/metrics", response_class=PlainTextResponse)
 def metrics(ident: dict = Depends(admin)) -> str:
     """Per-source metrics in Prometheus text format (lag, events/min, errors, queue depth, last sync)."""
@@ -212,7 +292,7 @@ def connections(ident: dict = Depends(admin)) -> dict:
 def pick_roots(connection_id: str, parent: str | None = None, ident: dict = Depends(admin)) -> dict:
     """Root picker: My Drive, shared drives, and folders (children of ``parent``)."""
     from ..connectors.gdrive.auth import make_client
-    from ..connectors.gdrive.client import FOLDER_MIME
+    from ..connectors.gdrive.client import DriveError, FOLDER_MIME
     client = make_client(ident["account_id"], connection_id)
     if parent:
         folders = []
@@ -221,7 +301,13 @@ def pick_roots(connection_id: str, parent: str | None = None, ident: dict = Depe
             folders += [{"kind": "folder", "id": f["id"], "name": f["name"]} for f in page]
         return {"parent": parent, "folders": sorted(folders, key=lambda f: f["name"].lower())}
     my = client.get_file("root", fields="id,name")
-    drives = client.list_drives()
+    # Shared-drive listing needs the same metadata scope but some Workspace
+    # policies still 403 it; My Drive + folder browse must still work.
+    try:
+        drives = client.list_drives()
+    except DriveError as e:
+        log.warning("list_drives unavailable (%s); continuing with My Drive only", e)
+        drives = []
     return {"my_drive": {"kind": "my_drive", "id": my["id"], "name": "My Drive"},
             "shared_drives": [{"kind": "shared_drive", "id": d["id"], "name": d["name"]} for d in drives]}
 

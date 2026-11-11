@@ -39,7 +39,7 @@
   <h1>Nous Drive Connectors</h1>
   <nav id="nav">
     <a data-tab="sources">Sources</a><a data-tab="connect-drive">Connect Drive</a><a data-tab="devices">Devices</a>
-    <a data-tab="keys">MCP keys</a><a data-tab="notifications">Notifications</a><a data-tab="changes">Changes</a>
+    <a data-tab="people">People</a><a data-tab="keys">MCP keys</a><a data-tab="notifications">Notifications</a><a data-tab="changes">Changes</a>
   </nav>
   <span style="flex:1"></span>
   <button class="ghost" id="logout">Sign out</button>
@@ -47,8 +47,12 @@
 <main>
   <section id="login" class="card hidden">
     <h2>Sign in</h2>
-    <p class="muted">Paste your admin key (created with <code>nous-drive create-account</code>).</p>
-    <div class="row"><input id="key" type="password" size="50" placeholder="nd_admin_…"><button id="signin">Sign in</button></div>
+    <p class="muted">We’ll email you a one-time link. It expires in 30 minutes.</p>
+    <div class="row"><input id="email" type="email" size="36" placeholder="you@example.org"><button id="request-link">Email me a link</button></div>
+    <p id="login-msg" class="muted"></p>
+    <details style="margin-top:12px"><summary class="muted">Use an admin key instead</summary>
+      <div class="row" style="margin-top:8px"><input id="key" type="password" size="50" placeholder="nd_admin_…"><button id="signin" class="ghost">Sign in with key</button></div>
+    </details>
   </section>
 
   <section data-panel="sources" class="hidden">
@@ -83,9 +87,19 @@
     <div class="card"><h3>Devices</h3><table><thead><tr><th>Name</th><th>OS</th><th>Agent</th><th>Last seen</th><th></th></tr></thead><tbody id="devices"></tbody></table></div>
   </section>
 
+  <section data-panel="people" class="hidden">
+    <div class="card"><h2>People</h2>
+      <p class="muted">Anyone listed here can sign in with a magic link emailed to them.</p>
+      <div class="row"><input id="invite-email" type="email" placeholder="colleague@example.org" size="28">
+        <input id="invite-name" placeholder="Name (optional)" size="20">
+        <button onclick="inviteMember()">Invite</button></div>
+      <p id="invite-msg" class="muted"></p>
+      <table><thead><tr><th>Email</th><th>Name</th><th>Role</th><th></th></tr></thead><tbody id="members"></tbody></table></div>
+  </section>
+
   <section data-panel="keys" class="hidden">
     <div class="card"><h2>MCP session keys</h2>
-      <p class="muted">Each Claude session or MCP client gets its own key, so "what's new" checkpoints are kept per session.</p>
+      <p class="muted">Each Claude session or MCP client gets its own key, so "what's new" checkpoints are kept per session. Create these from the web after signing in with email.</p>
       <div class="row"><input id="keyname" placeholder="e.g. Claude Desktop – laptop" size="36"><button onclick="newKey()">Create key</button></div>
       <pre id="newkey" class="hidden"></pre>
       <table><thead><tr><th>Name</th><th>Kind</th><th>Prefix</th><th>Last used</th><th></th></tr></thead><tbody id="keys"></tbody></table></div>
@@ -107,20 +121,39 @@ async function api(path, opts = {}) {
   if (!r.ok) { alert(body.detail || r.statusText); throw new Error(body.detail); }
   return body;
 }
-function showLogin() { $("#login").classList.remove("hidden"); document.querySelectorAll("[data-panel]").forEach(p => p.classList.add("hidden")); }
-$("#signin").onclick = async () => { KEY = $("#key").value.trim(); try { localStorage.setItem("nd_key", KEY); } catch (e) {} $("#login").classList.add("hidden"); route(); };
+function showLogin() { $("#login").classList.remove("hidden"); document.querySelectorAll("[data-panel]").forEach(p => p.classList.add("hidden")); $("#nav").classList.add("hidden"); }
+function hideLogin() { $("#login").classList.add("hidden"); $("#nav").classList.remove("hidden"); }
+$("#signin").onclick = async () => { KEY = $("#key").value.trim(); try { localStorage.setItem("nd_key", KEY); } catch (e) {} hideLogin(); route(); };
+$("#request-link").onclick = async () => {
+  const email = $("#email").value.trim();
+  if (!email) return;
+  $("#login-msg").textContent = "Sending…";
+  const r = await fetch("/api/auth/request-link", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({email})});
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok) { $("#login-msg").textContent = body.detail || "Could not send link"; return; }
+  let msg = "If that address is on this account, a sign-in link is on its way.";
+  if (body.dev_links && body.dev_links.length) msg += " Dev link: " + body.dev_links[0].url;
+  $("#login-msg").textContent = msg;
+};
 $("#logout").onclick = () => { try { localStorage.removeItem("nd_key"); } catch (e) {} KEY = null; showLogin(); };
 document.querySelectorAll("#nav a").forEach(a => a.onclick = () => { location.hash = a.dataset.tab; });
 window.addEventListener("hashchange", route);
 
 function route() {
-  if (!KEY) return showLogin();
   const h = location.hash.slice(1);
+  if (h.startsWith("session=")) {
+    KEY = decodeURIComponent(h.slice("session=".length));
+    try { localStorage.setItem("nd_key", KEY); } catch (e) {}
+    history.replaceState(null, "", "/app#sources");
+    hideLogin(); return route();
+  }
+  if (!KEY) return showLogin();
+  hideLogin();
   if (h.startsWith("pick-roots=")) { show("connect-drive"); return openPicker(h.split("=")[1]); }
-  if (h.startsWith("error=")) alert("Google sign-in failed: " + h.split("=")[1]);
-  const tab = ["sources","connect-drive","devices","keys","notifications","changes"].includes(h) ? h : "sources";
+  if (h.startsWith("error=")) alert(decodeURIComponent(h.split("=")[1]));
+  const tab = ["sources","connect-drive","devices","people","keys","notifications","changes"].includes(h) ? h : "sources";
   show(tab);
-  ({sources: loadSources, "connect-drive": loadConnections, devices: loadDevices, keys: loadKeys,
+  ({sources: loadSources, "connect-drive": loadConnections, devices: loadDevices, people: loadMembers, keys: loadKeys,
     notifications: loadNotifs, changes: loadChanges})[tab]();
 }
 function show(tab) {
@@ -207,6 +240,22 @@ async function loadDevices() {
 }
 async function renameDevice(id, name) { const n = prompt("Device name", name); if (n) { await api(`/api/devices/${id}`, {method: "PATCH", body: JSON.stringify({name: n})}); loadDevices(); } }
 async function revokeDevice(id) { if (confirm("Revoke this device's token?")) { await api(`/api/devices/${id}`, {method: "DELETE"}); loadDevices(); } }
+
+async function loadMembers() {
+  const r = await api("/api/members");
+  $("#members").innerHTML = r.members.map(m => `<tr><td>${esc(m.email)}</td><td>${esc(m.name || "")}</td><td>${m.role}${m.deactivated_at ? ' <span class="pill error">off</span>' : ""}</td>
+    <td>${m.deactivated_at ? "" : `<button class="ghost" onclick="deactivateMember('${m.id}')">Remove</button>`}</td></tr>`).join("")
+    || `<tr><td colspan=4 class="muted">No people yet.</td></tr>`;
+}
+async function inviteMember() {
+  const email = $("#invite-email").value.trim(); if (!email) return;
+  $("#invite-msg").textContent = "Inviting…";
+  const r = await api("/api/members", {method:"POST", body: JSON.stringify({email, name: $("#invite-name").value || null, send_invite: true})});
+  $("#invite-msg").textContent = r.invite_sent ? `Invite sent to ${r.member.email}.` : `Added ${r.member.email}.`;
+  if (r.dev_link) $("#invite-msg").textContent += " Dev link: " + r.dev_link;
+  $("#invite-email").value = ""; $("#invite-name").value = ""; loadMembers();
+}
+async function deactivateMember(id) { if (confirm("Remove this person’s access?")) { await api(`/api/members/${id}`, {method:"DELETE"}); loadMembers(); } }
 
 async function newKey() {
   const r = await api("/api/keys", {method: "POST", body: JSON.stringify({name: $("#keyname").value || "MCP session", kind: "session"})});

@@ -32,6 +32,16 @@ class Settings:
     secret_key: str = field(default_factory=lambda: _env("SECRET_KEY", "dev-insecure-secret-change-me"))
     public_base_url: str = field(default_factory=lambda: _env("PUBLIC_BASE_URL", "http://localhost:8080"))
 
+    # Email magic-link (Resend). Same pattern as Halqa: RESEND_API_KEY + FROM.
+    resend_api_key: str | None = field(default_factory=lambda: os.environ.get("RESEND_API_KEY") or _env("RESEND_API_KEY"))
+    email_from: str = field(
+        default_factory=lambda: os.environ.get("NOUS_DRIVE_EMAIL_FROM")
+        or _env("EMAIL_FROM")
+        or "Drive <noreply@projectlogos.co>"
+    )
+    # When true, request-link also returns the URL in the JSON (local/dev only).
+    dev_links: bool = field(default_factory=lambda: _bool("DEV_LINKS", False))
+
     # Google OAuth / Drive
     google_client_id: str | None = field(default_factory=lambda: _env("GOOGLE_CLIENT_ID"))
     google_client_secret: str | None = field(default_factory=lambda: _env("GOOGLE_CLIENT_SECRET"))

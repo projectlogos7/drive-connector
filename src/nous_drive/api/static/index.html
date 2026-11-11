@@ -407,7 +407,11 @@ async function loadOverview() {
 }
 
 /* ---------------------------------------------------------------- google drive */
-async function connectDrive(content) { const r = await api(`/api/oauth/google/start?content=${content}`); location.href = r.url; }
+async function connectDrive(content, connectionId) {
+  const q = new URLSearchParams({content: !!content});
+  if (connectionId) q.set("connection_id", connectionId);
+  const r = await api(`/api/oauth/google/start?${q}`); location.href = r.url;
+}
 async function loadDrive() {
   const [busy, conns] = await Promise.all([loadSourceState(), api("/api/connections")]);
   const active = conns.connections.filter(c => !c.revoked_at);
@@ -422,11 +426,14 @@ async function loadDrive() {
     const ids = new Set(sel[i].roots.map(r => r.source_id));
     const srcs = STATE.sources.filter(s => ids.has(s.id));
     const content = c.scopes.some(s => s.endsWith("drive.readonly"));
+    const needsAuth = srcs.some(s => /expired|revoked|reconnect/i.test(s.status_reason || ""));
     return `<div class="card"><div class="card-head">
         <div><h2>${esc(c.google_email || "Google account")}</h2>
-          <div class="small muted">${content ? "Names, folders and file contents" : "Names and folders only (read-only)"} · connected ${ago(c.created_at)}</div></div>
+          <div class="small muted">${content ? "Names, folders and file contents" : "Names and folders only (read-only)"} · connected ${ago(c.created_at)}
+            ${needsAuth ? ' · <span class="pill error">needs reconnect</span>' : ""}</div></div>
         <div class="row"><button class="btn" onclick="openSelection('${c.id}')">Choose what’s watched</button>
-          ${content ? "" : `<button class="btn ghost sm" onclick="connectDrive(true)" title="Needed only for content search and summaries">Allow content access</button>`}</div></div>
+          <button class="btn ghost sm" onclick="connectDrive(false,'${c.id}')">Reconnect</button>
+          ${content ? "" : `<button class="btn ghost sm" onclick="connectDrive(true,'${c.id}')" title="Needed only for content search and summaries">Allow content access</button>`}</div></div>
       ${srcs.length ? srcs.map(s => sourceRow(s)).join("") : `<div class="muted">Nothing watched for this account. <a href="#" onclick="openSelection('${c.id}');return false">Choose folders</a></div>`}
     </div>`;
   }).join("");
@@ -436,7 +443,21 @@ async function loadDrive() {
 /* ---- selection modal: whole My Drive / specific folders / shared drives */
 let SEL = null;
 async function openSelection(conn, justConnected) {
-  const [roots, current, conns] = await Promise.all([api(`/api/connections/${conn}/roots`), api(`/api/connections/${conn}/selection`), api("/api/connections")]);
+  let roots, current, conns;
+  try {
+    [roots, current, conns] = await Promise.all([api(`/api/connections/${conn}/roots`), api(`/api/connections/${conn}/selection`), api("/api/connections")]);
+  } catch (e) {
+    const msg = String(e && e.message || e);
+    if (/expired|revoked|reconnect/i.test(msg)) {
+      modal(`<header><h2>Reconnect Google Drive</h2>
+        <p>Google access for this account expired or was revoked. Sign in again to resume indexing.</p></header>
+        <div class="body"><p class="muted">${esc(msg)}</p></div>
+        <footer><div class="row"><button class="btn ghost" onclick="closeModal()">Cancel</button>
+          <button class="btn" onclick="connectDrive(false,'${conn}')">Reconnect</button></div></footer>`);
+      return;
+    }
+    throw e;
+  }
   const c = conns.connections.find(x => x.id === conn) || {};
   const cur = current.roots;
   const myRoot = roots.my_drive;

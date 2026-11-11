@@ -282,12 +282,34 @@ def google_callback(code: str | None = None, state: str | None = None, error: st
         set_connection_identity(st["a"], conn_row["id"], email, about.get("permissionId"))
     except Exception as e:
         log.warning("could not read Drive identity: %s", e)
-    if not st.get("conn"):
+    if st.get("conn"):
+        # Re-authorised an existing connection: resume any stuck sources.
+        try:
+            _resume_after_reconnect(st["a"], conn_row["id"])
+        except Exception as e:
+            log.warning("could not resume sources after reconnect: %s", e)
+    else:
         try:
             add_default_my_drive(st["a"], conn_row["id"], email)
         except Exception as e:
             log.warning("could not add My Drive by default: %s", e)
     return RedirectResponse(f"/app#drive/connected={conn_row['id']}")
+
+
+def _resume_after_reconnect(account_id, connection_id) -> None:
+    """Clear auth-error status and re-queue initial crawl / pull for this connection's sources."""
+    with db.scoped(account_id) as conn:
+        rows = conn.execute(
+            "SELECT id, status FROM drive_index.sources WHERE connection_id = %s",
+            (str(connection_id),),
+        ).fetchall()
+        for row in rows:
+            if row["status"] in ("error", "connecting", "degraded"):
+                accounts.set_status(conn, row["id"], "connecting", None)
+            queue.enqueue(
+                conn, account_id, "drive_initial_crawl", row["id"],
+                dedupe_key=f"crawl:{row['id']}",
+            )
 
 
 def add_default_my_drive(account_id, connection_id, email: str | None = None) -> dict | None:
@@ -319,24 +341,30 @@ def connections(ident: dict = Depends(admin)) -> dict:
 def pick_roots(connection_id: str, parent: str | None = None, ident: dict = Depends(admin)) -> dict:
     """Root picker: My Drive, shared drives, and folders (children of ``parent``)."""
     from ..connectors.gdrive.auth import make_client
-    from ..connectors.gdrive.client import DriveError, FOLDER_MIME
-    client = make_client(ident["account_id"], connection_id)
-    if parent:
-        folders = []
-        for page in client.iter_files(q=f"'{parent}' in parents and mimeType = '{FOLDER_MIME}' and trashed = false",
-                                      corpora="allDrives", fields="id,name,driveId"):
-            folders += [{"kind": "folder", "id": f["id"], "name": f["name"]} for f in page]
-        return {"parent": parent, "folders": sorted(folders, key=lambda f: f["name"].lower())}
-    my = client.get_file("root", fields="id,name")
-    # Shared-drive listing needs the same metadata scope but some Workspace
-    # policies still 403 it; My Drive + folder browse must still work.
+    from ..connectors.gdrive.client import AuthExpired, DriveError, FOLDER_MIME
     try:
-        drives = client.list_drives()
-    except DriveError as e:
-        log.warning("list_drives unavailable (%s); continuing with My Drive only", e)
-        drives = []
-    return {"my_drive": {"kind": "my_drive", "id": my["id"], "name": "My Drive"},
-            "shared_drives": [{"kind": "shared_drive", "id": d["id"], "name": d["name"]} for d in drives]}
+        client = make_client(ident["account_id"], connection_id)
+        if parent:
+            folders = []
+            for page in client.iter_files(q=f"'{parent}' in parents and mimeType = '{FOLDER_MIME}' and trashed = false",
+                                          corpora="allDrives", fields="id,name,driveId"):
+                folders += [{"kind": "folder", "id": f["id"], "name": f["name"]} for f in page]
+            return {"parent": parent, "folders": sorted(folders, key=lambda f: f["name"].lower())}
+        my = client.get_file("root", fields="id,name")
+        # Shared-drive listing needs the same metadata scope but some Workspace
+        # policies still 403 it; My Drive + folder browse must still work.
+        try:
+            drives = client.list_drives()
+        except DriveError as e:
+            log.warning("list_drives unavailable (%s); continuing with My Drive only", e)
+            drives = []
+        return {"my_drive": {"kind": "my_drive", "id": my["id"], "name": "My Drive"},
+                "shared_drives": [{"kind": "shared_drive", "id": d["id"], "name": d["name"]} for d in drives]}
+    except AuthExpired as e:
+        raise HTTPException(
+            401,
+            "Google access expired or was revoked. Click Reconnect on this account and sign in again.",
+        ) from e
 
 
 @app.get("/api/connections/{connection_id}/selection")

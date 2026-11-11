@@ -74,9 +74,9 @@ the PRD, and [agent/README.md](agent/README.md) for the local agent.
      starts immediately**; a dialog then lets you keep it or switch to specific folders (folder tree with
      checkboxes) and add shared drives. "Choose what's watched" reopens it at any time. Once the first index
      finishes, the account is watched continuously (push notifications, with polling every few minutes as a fallback).
-   * *Computers → Add a computer*: creates a pairing code and shows the install/pair commands, e.g.
+   * *Computers → Add a computer*: creates a pairing code and shows a live install command, e.g.
      ```bash
-     agent/installers/install.sh --code ABCD-EFGH --server https://drive.nous.example --name "Nous MacBook Pro"
+     curl -fsSL https://drive.nous.example/install.sh | bash -s -- --code ABCD-EFGH --server https://drive.nous.example --name "Nous MacBook Pro"
      nous-sync add ~/Footage
      ```
    Every source shows a live progress bar: Drive first counts items (metadata only, so there is a real total),

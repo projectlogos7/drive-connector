@@ -41,10 +41,10 @@ file index. No LLM is used unless you set `NOUS_DRIVE_SUMMARY_PROVIDER=ollama` (
 
 ## 3. Add a computer (local folders)
 
-**Computers → Add a computer**, then on that computer:
+**Computers → Add a computer**, then on that computer (Python 3.11+ required):
 
 ```bash
-agent/installers/install.sh --code ABCD-EFGH --server https://<your-domain> --name "Nous MacBook Pro"
+curl -fsSL https://<your-domain>/install.sh | bash -s -- --code ABCD-EFGH --server https://<your-domain> --name "Nous MacBook Pro"
 nous-sync add ~/Footage
 ```
 

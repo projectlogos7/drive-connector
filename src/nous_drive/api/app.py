@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import io
 import logging
+import os
+import zipfile
 from importlib import resources
+from pathlib import Path
 from typing import Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
-from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, RedirectResponse, Response
 from pydantic import BaseModel, Field
 
 from .. import __version__, accounts, db, ingest, queue
@@ -19,6 +23,19 @@ from ..mcp import tools as T
 log = logging.getLogger(__name__)
 
 app = FastAPI(title="Nous Drive Connectors", version=__version__)
+
+
+def _agent_dir() -> Path | None:
+    """Repo/Docker layout: agent/ next to the package (installers + nous-sync sources)."""
+    candidates = [
+        os.environ.get("NOUS_DRIVE_AGENT_DIR"),
+        str(Path(__file__).resolve().parents[3] / "agent"),  # …/drive-connector/agent
+        "/app/agent",
+    ]
+    for c in candidates:
+        if c and (Path(c) / "pyproject.toml").is_file() and (Path(c) / "src" / "nous_sync").is_dir():
+            return Path(c)
+    return None
 
 
 # ------------------------------------------------------------------ auth
@@ -74,6 +91,47 @@ def healthz() -> dict:
 @app.get("/", include_in_schema=False)
 def root() -> RedirectResponse:
     return RedirectResponse("/app")
+
+
+# ------------------------------------------------------------------ live Nous Sync installers (curl | bash from any computer)
+@app.get("/install.sh", include_in_schema=False)
+def install_sh():
+    agent = _agent_dir()
+    if not agent:
+        raise HTTPException(404, "agent installers not packaged on this server")
+    return FileResponse(agent / "installers" / "install.sh", media_type="text/x-shellscript",
+                        filename="install.sh")
+
+
+@app.get("/install.ps1", include_in_schema=False)
+def install_ps1():
+    agent = _agent_dir()
+    if not agent:
+        raise HTTPException(404, "agent installers not packaged on this server")
+    return FileResponse(agent / "installers" / "install.ps1", media_type="text/plain",
+                        filename="install.ps1")
+
+
+@app.get("/agent/nous-sync.zip", include_in_schema=False)
+def agent_package_zip():
+    """Zip of the nous-sync package so `pip install 'nous-sync @ <server>/agent/nous-sync.zip'` works."""
+    agent = _agent_dir()
+    if not agent:
+        raise HTTPException(404, "agent package not packaged on this server")
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for path in agent.rglob("*"):
+            if not path.is_file():
+                continue
+            rel = path.relative_to(agent)
+            parts = rel.parts
+            if parts[0] in (".git", ".venv", "venv", "__pycache__", "dist", "build", ".pytest_cache"):
+                continue
+            if any(p == "__pycache__" or p.endswith(".egg-info") for p in parts):
+                continue
+            zf.write(path, str(Path("nous-sync") / rel))
+    return Response(buf.getvalue(), media_type="application/zip",
+                    headers={"Content-Disposition": 'attachment; filename="nous-sync.zip"'})
 
 
 def _web_dir():
@@ -395,19 +453,24 @@ def google_callback(code: str | None = None, state: str | None = None, error: st
 
 
 def _resume_after_reconnect(account_id, connection_id) -> None:
-    """Clear auth-error status and re-queue initial crawl / pull for this connection's sources."""
+    """Clear auth-error status, re-queue crawl/pull, and backfill content if Drive content scope is new."""
+    from ..connectors.gdrive.auth import has_content_scope
+    from ..content.pipeline import request_backfill
     with db.scoped(account_id) as conn:
         rows = conn.execute(
             "SELECT id, status FROM drive_index.sources WHERE connection_id = %s",
             (str(connection_id),),
         ).fetchall()
         for row in rows:
-            if row["status"] in ("error", "connecting", "degraded"):
-                accounts.set_status(conn, row["id"], "connecting", None)
+            if row["status"] in ("error", "connecting", "degraded", "paused"):
+                accounts.set_status(conn, row["id"], "live" if row["status"] == "paused" else "connecting", None)
             queue.enqueue(
                 conn, account_id, "drive_initial_crawl", row["id"],
                 dedupe_key=f"crawl:{row['id']}",
             )
+        if has_content_scope(account_id, connection_id):
+            for row in rows:
+                request_backfill(conn, account_id, row["id"], "oauth")
 
 
 def add_default_my_drive(account_id, connection_id, email: str | None = None) -> dict | None:
@@ -533,8 +596,11 @@ def pairing_code(body: PairingRequest, ident: dict = Depends(admin)) -> dict:
     with db.scoped(ident["account_id"]) as conn:
         code = accounts.create_pairing_code(conn, ident["account_id"], body.name)
         audit(conn, ident["account_id"], f"key:{ident['key_id']}", "device.pairing_code", None, {"name": body.name})
+    base = get_settings().public_base_url.rstrip("/")
     return {"code": code, "expires_in_minutes": 15,
-            "instructions": f"On the computer: nous-sync pair {code} --server {get_settings().public_base_url}"}
+            "install": f"curl -fsSL {base}/install.sh | bash -s -- --code {code} --server {base}"
+                       + (f' --name "{body.name}"' if body.name else ""),
+            "instructions": f"On the computer: curl -fsSL {base}/install.sh | bash -s -- --code {code} --server {base}"}
 
 
 @app.get("/api/devices")

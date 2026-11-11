@@ -40,16 +40,19 @@ def _fresh(stage_data: dict | None, now: datetime) -> bool:
 
 
 def content_counts(conn, source_ids: list) -> dict[str, dict]:
-    """Per source: files waiting for content, files done, and embedding jobs still to run."""
+    """Per source: content pipeline counts and how many files are searchable."""
     if not source_ids:
         return {}
     rows = conn.execute(
         """SELECT source_id,
                   count(*) FILTER (WHERE content_status = 'queued') AS queued,
                   count(*) FILTER (WHERE content_status IN ('extracted','failed','skipped')) AS done,
-                  count(*) FILTER (WHERE content_status = 'extracted') AS extracted
+                  count(*) FILTER (WHERE content_status = 'extracted') AS extracted,
+                  count(*) FILTER (WHERE content_status = 'failed') AS failed,
+                  count(*) FILTER (WHERE content_status = 'skipped') AS skipped,
+                  count(*) FILTER (WHERE content_status <> 'not_requested') AS eligible
            FROM drive_index.nodes
-           WHERE source_id = ANY(%s) AND kind = 'file' AND status = 'active' AND content_status <> 'not_requested'
+           WHERE source_id = ANY(%s) AND kind = 'file' AND status = 'active'
            GROUP BY source_id""", (source_ids,)).fetchall()
     out = {str(r["source_id"]): dict(r) for r in rows}
     for r in conn.execute(
@@ -57,6 +60,16 @@ def content_counts(conn, source_ids: list) -> dict[str, dict]:
                WHERE source_id = ANY(%s) AND kind = 'content_embed' AND status IN ('pending','running')
                GROUP BY source_id""", (source_ids,)):
         out.setdefault(str(r["source_id"]), {"queued": 0, "done": 0, "extracted": 0})["embed_pending"] = r["n"]
+    # Searchable = active files with at least one embedding for the current content version.
+    for r in conn.execute(
+            """SELECT n.source_id, count(DISTINCT n.id) AS searchable
+               FROM drive_index.nodes n
+               JOIN drive_index.chunks c ON c.node_id = n.id AND c.content_version = n.content_version
+               JOIN drive_index.embeddings e ON e.chunk_id = c.id
+               WHERE n.source_id = ANY(%s) AND n.kind = 'file' AND n.status = 'active'
+                 AND n.content_status = 'extracted'
+               GROUP BY n.source_id""", (source_ids,)):
+        out.setdefault(str(r["source_id"]), {})["searchable"] = r["searchable"]
     return out
 
 
@@ -98,16 +111,17 @@ def build(src: dict, cur: dict | None, live: dict | None, counts: dict | None, j
 
     # -- content + embed (Phase 2)
     c = counts
-    has_content = content_enabled and (c.get("queued") or c.get("done") or c.get("embed_pending"))
+    has_content = content_enabled and (c.get("queued") or c.get("done") or c.get("embed_pending")
+                                       or c.get("eligible") or c.get("searchable"))
     if not content_enabled:
         st["content"]["state"] = st["embed"]["state"] = "skipped"
     elif has_content:
         ctotal = (c.get("queued") or 0) + (c.get("done") or 0)
-        st["content"].update(done=c.get("done") or 0, total=ctotal,
+        st["content"].update(done=c.get("done") or 0, total=ctotal or None,
                              state="active" if c.get("queued") else ("done" if index_done else "pending"))
         pend = c.get("embed_pending") or 0
         etotal = c.get("extracted") or 0
-        st["embed"].update(done=max(etotal - pend, 0), total=etotal,
+        st["embed"].update(done=max(etotal - pend, 0), total=etotal or None,
                            state="active" if pend else ("done" if index_done and not c.get("queued") else "pending"))
     elif index_done:
         st["content"]["state"] = st["embed"]["state"] = "done"
@@ -120,7 +134,8 @@ def build(src: dict, cur: dict | None, live: dict | None, counts: dict | None, j
             t = _parse(d.get("updated_at"))
             if current is None or t > _parse(current["at"]):
                 stage = "index" if key == "sync" else key
-                current = {**d["current"], "stage": stage, "at": d["updated_at"],
+                current = {**d["current"], "source": src["name"], "source_id": str(src["id"]),
+                           "stage": stage, "at": d["updated_at"],
                            "action": {"index": "Indexing", "content": "Reading", "embed": "Making searchable",
                                       "sync": "Updating"}[key]}
 
@@ -135,6 +150,10 @@ def build(src: dict, cur: dict | None, live: dict | None, counts: dict | None, j
     percent = round(100 * sum(frac(st[k]) * w for k, w in weights.items()) / max(sum(weights.values()), 1))
     active = next((st[k] for k, _ in STAGES if st[k]["state"] == "active"), None)
     busy = bool(active) or status in ("connecting", "initial_scan")
+    searchable = int(counts.get("searchable") or 0) if content_enabled else 0
+    eligible = int(counts.get("eligible") or 0) if content_enabled else 0
+    content_queued = (int(counts.get("queued") or 0) + int(counts.get("embed_pending") or 0)) if content_enabled else 0
+    content_failed = int(counts.get("failed") or 0) if content_enabled else 0
     if status == "paused":
         label, busy = "Paused", False
     elif status == "error":
@@ -145,7 +164,15 @@ def build(src: dict, cur: dict | None, live: dict | None, counts: dict | None, j
     elif busy:
         label = st["discover"]["label"]
     else:
-        label, percent = "Up to date — watching for changes", 100
+        percent = 100
+        if content_enabled and content_queued:
+            label = f"Synced · making {content_queued:,} searchable"
+        elif content_enabled and content_failed and searchable == 0 and eligible:
+            label = f"Synced · content blocked ({content_failed:,} failed)"
+        elif content_enabled:
+            label = f"Up to date — {searchable:,} searchable"
+        else:
+            label = "Up to date — watching for changes"
     if busy:
         percent = min(percent, 99)
     step = next((i + 1 for i, (k, _) in enumerate(STAGES) if active and k == active["key"]), None)
@@ -159,6 +186,11 @@ def build(src: dict, cur: dict | None, live: dict | None, counts: dict | None, j
         "phase": status if status in ("paused", "error") else (
             "live" if not busy else (phase if running else (active["key"] if active else "queued"))),
         "done": active.get("done") if active else None, "total": active.get("total") if active else None,
+        "content_enabled": content_enabled,
+        "searchable": searchable,
+        "searchable_eligible": eligible,
+        "searchable_pending": content_queued,
+        "searchable_failed": content_failed,
     }
 
 
@@ -189,6 +221,12 @@ def snapshot(conn, account_id=None) -> list[dict]:
         st = (curs.get(sid) or {}).get("stats") or {}
         p.update(name=s["name"], type=s["type"], files=st.get("files"), folders=st.get("folders"),
                  bytes=st.get("bytes"))
+        # When content is on but nothing has been requested yet, eligible stays 0 — still show 0 searchable.
+        if "searchable" not in p:
+            p["searchable"] = 0
+            p["searchable_eligible"] = 0
+            p["searchable_pending"] = 0
+            p["searchable_failed"] = 0
         out.append(p)
     return out
 

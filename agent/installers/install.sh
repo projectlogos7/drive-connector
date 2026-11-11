@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # Nous Sync installer for macOS and Linux.
-#   curl -fsSL <url>/install.sh | bash -s -- --code ABCD-EFGH --server https://drive.nous.example [--name "Nous MacBook Pro"]
+#   curl -fsSL <server>/install.sh | bash -s -- --code ABCD-EFGH --server https://drive.nous.example [--name "Nous MacBook Pro"]
 set -euo pipefail
-CODE="" SERVER="" NAME="" SRC="${NOUS_SYNC_SRC:-nous-sync}"
+CODE="" SERVER="" NAME="" SRC="${NOUS_SYNC_SRC:-}"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --code) CODE="$2"; shift 2;;
     --server) SERVER="$2"; shift 2;;
     --name) NAME="$2"; shift 2;;
-    --source) SRC="$2"; shift 2;;   # path or URL of the nous-sync package (default: from the package index)
+    --source) SRC="$2"; shift 2;;   # path, URL, or package name (default: <server>/agent/nous-sync.zip)
     *) echo "unknown option $1"; exit 1;;
   esac
 done
@@ -19,7 +19,17 @@ APP="$HOME/.nous-sync/app"
 mkdir -p "$APP"
 "$PY" -m venv "$APP/venv"
 "$APP/venv/bin/pip" install --quiet --upgrade pip
-"$APP/venv/bin/pip" install --quiet "$SRC[content]"
+# Prefer the agent package served by this Drive server (works without PyPI).
+if [[ -z "$SRC" ]]; then
+  if [[ -n "$SERVER" ]]; then
+    SRC="nous-sync[content] @ ${SERVER%/}/agent/nous-sync.zip"
+  else
+    SRC="nous-sync[content]"
+  fi
+elif [[ "$SRC" != *"@"* && "$SRC" != *"["* ]]; then
+  SRC="${SRC}[content]"
+fi
+"$APP/venv/bin/pip" install --quiet "$SRC"
 mkdir -p "$HOME/.local/bin"
 ln -sf "$APP/venv/bin/nous-sync" "$HOME/.local/bin/nous-sync"
 echo "Installed nous-sync to $APP (linked at ~/.local/bin/nous-sync)"

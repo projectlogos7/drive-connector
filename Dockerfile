@@ -12,9 +12,13 @@ WORKDIR /app
 ENV PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 NOUS_DRIVE_WEB_DIR=/app/web
 COPY pyproject.toml README.md ./
 COPY src ./src
+COPY agent ./agent
+ENV NOUS_DRIVE_AGENT_DIR=/app/agent
 RUN pip install .
 COPY --from=web /web/out /app/web
-RUN useradd -r -u 10001 nous && mkdir -p /home/nous && chown nous /home/nous
+RUN useradd -r -u 10001 nous \
+ && mkdir -p /home/nous/.cache /var/cache/embeddings \
+ && chown -R nous:nous /home/nous /var/cache/embeddings
 USER nous
 ENV HOME=/home/nous
 EXPOSE 8080 8090

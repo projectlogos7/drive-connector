@@ -62,6 +62,7 @@ function CurrentFile({ p }: { p: Progress }) {
       {c.kind === "folder" ? <Folder className="h-4 w-4 shrink-0 text-muted" /> : <FileText className="h-4 w-4 shrink-0 text-muted" />}
       <span className="shrink-0 text-muted">{c.action}</span>
       <span className="min-w-0 truncate font-medium" title={c.path || c.name}>{c.name}</span>
+      {c.source && <span className="shrink-0 text-muted">· {c.source}</span>}
       {c.size != null && <span className="shrink-0 tabular-nums text-muted">· {bytes(c.size)}</span>}
     </div>
   );
@@ -103,9 +104,20 @@ export function SourceCard({ source, health, showOwner }: { source: Source; heal
   }
 
   const files = p?.files ?? source.files, folders = p?.folders ?? source.folders;
+  const searchable = p?.searchable;
   const meta: string[] = [];
   if (busy && active && active.key === "index" && active.done) meta.push(`${fmt(active.done)} indexed so far`);
-  else meta.push(`${fmt(files)} files`, `${fmt(folders)} folders`, p?.bytes != null ? bytes(p.bytes) : source.total_size);
+  else {
+    meta.push(`${fmt(files)} files`);
+    if (p?.content_enabled !== false && searchable != null) {
+      const pending = p.searchable_pending || 0;
+      const failed = p.searchable_failed || 0;
+      if (pending) meta.push(`${fmt(searchable)} searchable · ${fmt(pending)} reading`);
+      else if (failed && searchable === 0) meta.push(`0 searchable · ${fmt(failed)} failed`);
+      else meta.push(`${fmt(searchable)} searchable`);
+    }
+    meta.push(`${fmt(folders)} folders`, p?.bytes != null ? bytes(p.bytes) : source.total_size);
+  }
   if (showOwner) meta.push(source.type === "gdrive" ? "Google Drive" : source.device || "Computer");
 
   return (

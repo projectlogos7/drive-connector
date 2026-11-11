@@ -285,10 +285,12 @@ def get_tree(ctx: Ctx, path: str | None = None, node_id: str | None = None, sour
                FROM drive_index.nodes WHERE parent_id = ANY(%s) AND status = 'active' GROUP BY parent_id""",
             ([r["id"] for r in rows if r["kind"] == "folder"],))}
         src = get_source(conn, root["source_id"])
+        src_name = src["name"] if src else None
     nodes: dict[str, dict] = {}
     for r in rows:
         c = counts.get(str(r["id"]), {})
-        nd = {"name": r["name"], "kind": r["kind"], "id": str(r["id"])}
+        nd = {"name": r["name"], "kind": r["kind"], "id": str(r["id"]), "source": src_name,
+              "source_id": str(root["source_id"])}
         if r["kind"] == "folder":
             nd.update(files=c.get("files", 0), folders=c.get("folders", 0), children=[])
         else:
@@ -308,7 +310,7 @@ def get_tree(ctx: Ctx, path: str | None = None, node_id: str | None = None, sour
             render(ch, indent + 1)
 
     render(tree, 0)
-    return {"source": src["name"], "path": root["path"], "depth": depth, "truncated": truncated,
+    return {"source": src_name, "path": root["path"], "depth": depth, "truncated": truncated,
             "text": "\n".join(lines), "tree": tree}
 
 

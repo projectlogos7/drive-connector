@@ -21,6 +21,8 @@ export default function Overview() {
   const progress = Object.values(live.progress);
   const files = progress.length ? progress.reduce((a, p) => a + (p.files || 0), 0) : data?.sources.reduce((a, s) => a + s.files, 0);
   const folders = progress.length ? progress.reduce((a, p) => a + (p.folders || 0), 0) : data?.sources.reduce((a, s) => a + s.folders, 0);
+  const searchable = progress.length ? progress.reduce((a, p) => a + (p.searchable || 0), 0) : null;
+  const searchablePending = progress.reduce((a, p) => a + (p.searchable_pending || 0), 0);
   const size = progress.reduce((a, p) => a + (p.bytes || 0), 0);
   const working = progress.filter((p) => p.busy).length;
   // Live feed: stream items first, then the recent list (deduplicated)
@@ -36,7 +38,8 @@ export default function Overview() {
     <>
       <PageHead title="Overview" sub="Everything being indexed, live." />
       <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Tile label="Files indexed" value={files == null ? null : fmt(files)} />
+        <Tile label="Files indexed" value={files == null ? null : fmt(files)}
+          sub={searchable == null ? undefined : searchablePending ? `${fmt(searchable)} searchable · ${fmt(searchablePending)} reading` : `${fmt(searchable)} searchable`} />
         <Tile label="Folders" value={folders == null ? null : fmt(folders)} sub={size ? bytes(size) : undefined} />
         <Tile label="Sources" value={data ? `${data.sources.length}` : null} sub={working ? `${working} working now` : data?.sources.length ? "all up to date" : undefined} />
         <Tile label="Changes in 24 h" value={recent ? `${fmt(today)}${recent.total_is_lower_bound ? "+" : ""}` : null} />

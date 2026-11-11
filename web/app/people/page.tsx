@@ -34,7 +34,7 @@ export default function PeoplePage() {
   return (
     <>
       {node}
-      <PageHead title="People" sub="Anyone listed here can sign in with a link emailed to them." />
+      <PageHead title="People" sub="Invite people to this account (shared index). For a totally separate tenant, run nous-drive create-account on the server." />
       <Card className="p-5">
         <form onSubmit={invite} className="flex flex-wrap gap-2">
           <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="colleague@example.org" className="min-w-[200px] flex-[2] rounded-lg border border-line bg-panel px-3 py-2 text-sm" />

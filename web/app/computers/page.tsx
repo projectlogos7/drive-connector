@@ -92,8 +92,8 @@ function PairDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
       ) : (
         <div className="pb-2">
           <p className="text-sm">Pairing code <b className="font-mono text-base">{code}</b> <span className="text-muted">— valid for 15 minutes, single use.</span></p>
-          <CopyBox label="Mac / Linux — install and pair" text={`agent/installers/install.sh --code ${code} --server ${server}${nameArg}`} />
-          <CopyBox label="Windows (PowerShell)" text={`agent\\installers\\install.ps1 -Code ${code} -Server ${server}${name ? ` -Name "${name}"` : ""}`} />
+          <CopyBox label="Mac / Linux — install and pair" text={`curl -fsSL ${server}/install.sh | bash -s -- --code ${code} --server ${server}${nameArg}`} />
+          <CopyBox label="Windows (PowerShell)" text={`irm ${server}/install.ps1 -OutFile install.ps1; .\\install.ps1 -Code ${code} -Server ${server}${name ? ` -Name "${name}"` : ""}`} />
           <CopyBox label="Already installed? Pair, then add folders" text={`nous-sync pair ${code} --server ${server}${nameArg}\nnous-sync add ~/Footage`} />
         </div>
       )}

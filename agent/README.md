@@ -5,7 +5,7 @@ Nous Drive index. Phase 2 sends extracted text only for files the server asks ab
 indexing is switched on for that folder.
 
 ```bash
-installers/install.sh --code ABCD-EFGH --server https://drive.nous.example --name "Nous MacBook Pro"
+curl -fsSL https://drive.nous.example/install.sh | bash -s -- --code ABCD-EFGH --server https://drive.nous.example --name "Nous MacBook Pro"
 nous-sync add ~/Footage
 nous-sync add "/Volumes/Edit RAID/Projects" --ignore "Render Cache/*"
 nous-sync status

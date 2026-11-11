@@ -168,7 +168,7 @@ def request_backfill(conn, account_id, source_id, actor: str) -> int:
     src = conn.execute("SELECT * FROM drive_index.sources WHERE id = %s", (str(source_id),)).fetchone()
     rows = conn.execute(
         """SELECT * FROM drive_index.nodes WHERE source_id = %s AND kind = 'file' AND status = 'active'
-           AND content_status IN ('not_requested','failed')""",
+           AND content_status IN ('not_requested','failed','skipped')""",
         (str(source_id),),
     ).fetchall()
     from .. import queue

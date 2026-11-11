@@ -586,8 +586,8 @@ async function openPair() {
     const r = await api("/api/devices/pairing-codes", {method: "POST", body: JSON.stringify({name: $("#devname").value || null})});
     const server = location.origin;
     $("#pair-out").innerHTML = `<p class="small muted" style="margin-top:14px">Pairing code <b class="mono">${esc(r.code)}</b> — valid for ${r.expires_in_minutes} minutes.</p>
-      <div class="section-label">1 · Install Nous Sync (Mac / Linux)</div><pre class="box">agent/installers/install.sh --code ${esc(r.code)} --server ${esc(server)}${$("#devname").value ? ` --name "${esc($("#devname").value)}"` : ""}</pre>
-      <div class="small muted">Windows: <code>agent\\installers\\install.ps1 -Code ${esc(r.code)} -Server ${esc(server)}</code></div>
+      <div class="section-label">1 · Install Nous Sync (Mac / Linux)</div><pre class="box">curl -fsSL ${esc(server)}/install.sh | bash -s -- --code ${esc(r.code)} --server ${esc(server)}${$("#devname").value ? ` --name "${esc($("#devname").value)}"` : ""}</pre>
+      <div class="small muted">Windows: <code>irm ${esc(server)}/install.ps1 -OutFile install.ps1; .\\install.ps1 -Code ${esc(r.code)} -Server ${esc(server)}</code></div>
       <div class="section-label">Already installed? Pair and add folders</div><pre class="box">nous-sync pair ${esc(r.code)} --server ${esc(server)}\nnous-sync add ~/Footage</pre>
       <p class="small muted">The computer appears here as soon as it connects.</p>`;
     $("#pair-go").classList.add("hidden");

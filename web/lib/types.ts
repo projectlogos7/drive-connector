@@ -14,6 +14,8 @@ export interface CurrentFile {
   size: number | null;
   path: string | null;
   kind: string | null;
+  source?: string | null;
+  source_id?: string | null;
   stage: StageKey;
   action: string;
   at: string;
@@ -35,6 +37,11 @@ export interface Progress {
   files: number | null;
   folders: number | null;
   bytes: number | null;
+  content_enabled?: boolean;
+  searchable?: number;
+  searchable_eligible?: number;
+  searchable_pending?: number;
+  searchable_failed?: number;
 }
 
 export type SourceStatus = "connecting" | "initial_scan" | "live" | "degraded" | "paused" | "error";

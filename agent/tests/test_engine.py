@@ -132,3 +132,28 @@ def test_ignore_rules():
     assert ig.ignored(".git/config") and ig.ignored("a/Thumbs.db") and ig.ignored("x/~$doc.docx")
     assert ig.ignored("p/x.prproj-autosave") and ig.ignored("Render Cache/a.mov")
     assert not ig.ignored("Footage/A001.mov")
+
+
+def test_reused_inode_is_not_mistaken_for_a_rename(env, monkeypatch):
+    root, st, eng = env
+    write(root / "notes.txt", b"call list")
+    eng.catch_up()
+    ids = {e["name"]: e["provider_id"] for e in drain(st)}
+    rec = st.get("src1", "notes.txt")
+    (root / "notes.txt").unlink()
+    write(root / "A002.mov", b"b")
+    # Simulate the file system handing the freed inode to the new file.
+    import nous_sync.engine as E
+    real = E.scan
+
+    def fake_scan(*a, **k):
+        out = real(*a, **k)
+        if "A002.mov" in out:
+            out["A002.mov"].fs_key = rec.fs_key
+        return out
+    monkeypatch.setattr(E, "scan", fake_scan)
+    stats = eng.catch_up()
+    ev = drain(st)
+    assert stats["moved"] == 0 and stats["added"] == 1 and stats["deleted"] == 1
+    added = next(e for e in ev if e.get("name") == "A002.mov")
+    assert added["provider_id"] != ids["notes.txt"]

@@ -3,279 +3,693 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Nous Drive Connectors</title>
+<title>Nous Drive</title>
 <style>
-  :root { --bg:#f7f7f5; --card:#fff; --ink:#1c1c1a; --muted:#6b6b66; --line:#e3e2dd; --accent:#2f5d50;
-          --ok:#2e7d32; --warn:#b26a00; --bad:#b3261e; }
-  @media (prefers-color-scheme: dark) { :root { --bg:#141413; --card:#1e1e1c; --ink:#ecebe6; --muted:#9a9993;
-          --line:#33332f; --accent:#7fbfa9; } }
-  * { box-sizing: border-box; }
-  body { margin:0; font:15px/1.5 system-ui, -apple-system, Segoe UI, sans-serif; background:var(--bg); color:var(--ink); }
-  header { display:flex; align-items:center; gap:16px; padding:14px 20px; border-bottom:1px solid var(--line); flex-wrap:wrap; }
-  header h1 { font-size:17px; margin:0; font-weight:600; }
-  nav a { margin-right:14px; color:var(--muted); text-decoration:none; cursor:pointer; }
-  nav a.on { color:var(--ink); font-weight:600; }
-  main { max-width:1080px; margin:0 auto; padding:20px 16px 60px; }
-  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; margin-bottom:16px; overflow-x:auto; }
-  table { width:100%; border-collapse:collapse; font-size:14px; }
-  th, td { text-align:left; padding:7px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
-  th { color:var(--muted); font-weight:500; }
-  button, .btn { background:var(--accent); color:#fff; border:0; border-radius:7px; padding:6px 12px; cursor:pointer; font:inherit; font-size:14px; }
-  button.ghost { background:transparent; color:var(--ink); border:1px solid var(--line); }
-  button.danger { background:var(--bad); }
-  input, select { font:inherit; padding:6px 8px; border:1px solid var(--line); border-radius:7px; background:var(--card); color:var(--ink); }
-  .pill { display:inline-block; padding:1px 8px; border-radius:20px; font-size:12px; border:1px solid var(--line); }
-  .live { color:var(--ok); border-color:var(--ok); } .degraded,.initial_scan,.connecting { color:var(--warn); border-color:var(--warn); }
-  .error { color:var(--bad); border-color:var(--bad); } .paused { color:var(--muted); }
-  .muted { color:var(--muted); font-size:13px; }
+  :root {
+    --bg:#f6f5f2; --panel:#ffffff; --ink:#1c1b19; --muted:#6d6b65; --faint:#9a978f; --line:#e6e3dc;
+    --accent:#2f5d50; --accent-ink:#ffffff; --accent-soft:#e3eee9; --ok:#2e7d4f; --ok-soft:#e2f2e8;
+    --warn:#a76300; --warn-soft:#fbefd9; --bad:#b3261e; --bad-soft:#f9e1df; --track:#ebe8e1;
+    --shadow:0 1px 2px rgba(0,0,0,.04), 0 4px 16px rgba(0,0,0,.05); --radius:12px;
+  }
+  @media (prefers-color-scheme: dark) { :root {
+    --bg:#121211; --panel:#1b1b19; --ink:#ecebe6; --muted:#a3a19a; --faint:#76746e; --line:#2e2d29;
+    --accent:#7fbfa9; --accent-ink:#0f1a16; --accent-soft:#1f2f29; --ok:#6fcf97; --ok-soft:#1b2c22;
+    --warn:#f2b558; --warn-soft:#30261a; --bad:#ff8a80; --bad-soft:#341c1a; --track:#2a2926;
+    --shadow:0 1px 2px rgba(0,0,0,.3);
+  } }
+  * { box-sizing:border-box; }
+  html, body { margin:0; background:var(--bg); color:var(--ink); }
+  body { font:15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  button { font:inherit; cursor:pointer; }
+  a { color:var(--accent); }
+  .hidden { display:none !important; }
+  .muted { color:var(--muted); } .small { font-size:13px; } .faint { color:var(--faint); }
+  code, pre, .mono { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:13px; }
+
+  /* layout */
+  .shell { display:grid; grid-template-columns:232px 1fr; min-height:100vh; }
+  aside { border-right:1px solid var(--line); padding:20px 14px; position:sticky; top:0; height:100vh; display:flex; flex-direction:column; gap:4px; }
+  .brand { display:flex; align-items:center; gap:10px; font-weight:650; font-size:16px; padding:4px 10px 18px; }
+  .brand .logo { width:28px; height:28px; border-radius:8px; background:var(--accent); color:var(--accent-ink); display:grid; place-items:center; font-size:15px; }
+  .nav a { display:flex; align-items:center; gap:10px; padding:8px 10px; border-radius:8px; color:var(--muted); text-decoration:none; }
+  .nav a:hover { background:var(--panel); color:var(--ink); }
+  .nav a.on { background:var(--panel); color:var(--ink); font-weight:600; box-shadow:var(--shadow); }
+  .nav svg { width:18px; height:18px; flex:none; }
+  .nav .count { margin-left:auto; font-size:12px; color:var(--faint); }
+  aside .foot { margin-top:auto; padding:10px; font-size:13px; color:var(--muted); }
+  main { padding:28px 32px 80px; max-width:1100px; width:100%; }
+  .page-head { display:flex; align-items:flex-end; justify-content:space-between; gap:16px; margin-bottom:20px; flex-wrap:wrap; }
+  h1 { font-size:24px; margin:0; letter-spacing:-.01em; } h2 { font-size:17px; margin:0 0 4px; } h3 { font-size:15px; margin:0; }
+  .page-head p { margin:4px 0 0; color:var(--muted); }
+
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); box-shadow:var(--shadow); padding:18px 20px; margin-bottom:16px; }
+  .card-head { display:flex; align-items:center; gap:12px; justify-content:space-between; flex-wrap:wrap; margin-bottom:12px; }
   .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
-  code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size:13px; }
-  pre { white-space:pre-wrap; background:var(--bg); padding:10px; border-radius:7px; }
-  .hidden { display:none; }
+  .grid4 { display:grid; grid-template-columns:repeat(4, 1fr); gap:12px; margin-bottom:16px; }
+  .tile { background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:14px 16px; box-shadow:var(--shadow); }
+  .tile .v { font-size:24px; font-weight:650; font-variant-numeric:tabular-nums; } .tile .k { color:var(--muted); font-size:13px; }
+
+  .btn { border:1px solid transparent; background:var(--accent); color:var(--accent-ink); border-radius:8px; padding:7px 14px; font-size:14px; font-weight:550; }
+  .btn:hover { filter:brightness(1.05); }
+  .btn.ghost { background:transparent; color:var(--ink); border-color:var(--line); font-weight:500; }
+  .btn.ghost:hover { background:var(--bg); }
+  .btn.danger { background:transparent; color:var(--bad); border-color:var(--line); }
+  .btn.sm { padding:4px 10px; font-size:13px; }
+  .btn:disabled { opacity:.5; cursor:default; }
+  input[type=text], input[type=email], input[type=password], input:not([type]), select, textarea {
+    font:inherit; padding:8px 10px; border:1px solid var(--line); border-radius:8px; background:var(--panel); color:var(--ink); min-width:0; }
+  input:focus, select:focus, textarea:focus, .btn:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+
+  .pill { display:inline-flex; align-items:center; gap:6px; padding:2px 9px; border-radius:20px; font-size:12px; font-weight:550; background:var(--bg); color:var(--muted); white-space:nowrap; }
+  .pill::before { content:""; width:7px; height:7px; border-radius:50%; background:currentColor; }
+  .pill.live { background:var(--ok-soft); color:var(--ok); }
+  .pill.initial_scan, .pill.connecting, .pill.degraded { background:var(--warn-soft); color:var(--warn); }
+  .pill.error { background:var(--bad-soft); color:var(--bad); }
+  .pill.paused { color:var(--muted); }
+
+  /* sources & progress */
+  .src { padding:14px 0; border-top:1px solid var(--line); display:grid; grid-template-columns:1fr auto; gap:6px 16px; align-items:center; }
+  .src:first-of-type { border-top:0; }
+  .src .name { font-weight:600; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .src .meta { font-size:13px; color:var(--muted); }
+  .src .actions { display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end; }
+  .src .prog { grid-column:1 / -1; }
+  .bar { height:8px; background:var(--track); border-radius:8px; overflow:hidden; position:relative; }
+  .bar > i { position:absolute; inset:0 auto 0 0; background:var(--accent); border-radius:8px; transition:width .6s ease; }
+  .bar.done > i { background:var(--ok); }
+  .bar.indet > i { width:30% !important; animation:slide 1.4s ease-in-out infinite; }
+  @keyframes slide { 0% { left:-30%; } 100% { left:100%; } }
+  .prog-label { display:flex; justify-content:space-between; gap:8px; font-size:13px; color:var(--muted); margin-top:6px; }
+  .prog-label b { color:var(--ink); font-weight:600; font-variant-numeric:tabular-nums; }
+
+  .empty { text-align:center; padding:36px 16px; color:var(--muted); }
+  .empty .big { font-size:34px; margin-bottom:6px; }
+  table { width:100%; border-collapse:collapse; font-size:14px; }
+  th, td { text-align:left; padding:9px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--muted); font-weight:500; font-size:13px; }
+  .table-wrap { overflow-x:auto; }
+  .dot { width:8px; height:8px; border-radius:50%; display:inline-block; background:var(--faint); }
+  .dot.on { background:var(--ok); }
+  .tabs { display:flex; gap:4px; border-bottom:1px solid var(--line); margin-bottom:14px; }
+  .tabs button { background:none; border:0; padding:8px 12px; color:var(--muted); border-bottom:2px solid transparent; margin-bottom:-1px; }
+  .tabs button.on { color:var(--ink); border-color:var(--accent); font-weight:600; }
+  pre.box { background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:12px; white-space:pre-wrap; word-break:break-all; margin:8px 0 0; }
+  .change { display:grid; grid-template-columns:90px 1fr auto; gap:10px; padding:8px 0; border-bottom:1px solid var(--line); font-size:14px; }
+  .change .t { font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:.03em; color:var(--muted); }
+  .change .t.added { color:var(--ok); } .change .t.deleted, .change .t.removed { color:var(--bad); }
+
+  /* modal */
+  .scrim { position:fixed; inset:0; background:rgba(15,15,14,.45); display:grid; place-items:center; padding:16px; z-index:50; }
+  .modal { background:var(--panel); border-radius:16px; width:min(680px, 100%); max-height:min(88vh, 860px); display:flex; flex-direction:column; box-shadow:0 20px 60px rgba(0,0,0,.25); }
+  .modal header { padding:20px 22px 8px; } .modal header p { margin:4px 0 0; color:var(--muted); font-size:14px; }
+  .modal .body { padding:8px 22px; overflow:auto; flex:1; }
+  .modal footer { padding:14px 22px; border-top:1px solid var(--line); display:flex; justify-content:space-between; gap:8px; align-items:center; flex-wrap:wrap; }
+  .choice { display:flex; gap:12px; padding:14px; border:1.5px solid var(--line); border-radius:12px; margin:10px 0; cursor:pointer; align-items:flex-start; }
+  .choice:hover { border-color:var(--faint); }
+  .choice.on { border-color:var(--accent); background:var(--accent-soft); }
+  .choice input { margin-top:3px; accent-color:var(--accent); }
+  .choice .ttl { font-weight:600; } .choice .sub { font-size:13px; color:var(--muted); }
+  .tree { border:1px solid var(--line); border-radius:10px; margin-top:8px; max-height:340px; overflow:auto; padding:6px; }
+  .node > .line { display:flex; align-items:center; gap:6px; padding:4px 6px; border-radius:6px; }
+  .node > .line:hover { background:var(--bg); }
+  .node > .kids { margin-left:20px; }
+  .chev { width:20px; height:20px; border:0; background:none; color:var(--muted); display:grid; place-items:center; border-radius:4px; padding:0; transition:transform .15s; }
+  .chev.open { transform:rotate(90deg); } .chev.none { visibility:hidden; }
+  .node label { display:flex; align-items:center; gap:8px; cursor:pointer; flex:1; min-width:0; }
+  .node label span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .node input { accent-color:var(--accent); }
+  .node input:disabled + * , .node input:disabled ~ span { opacity:.6; }
+  .chips { display:flex; flex-wrap:wrap; gap:6px; margin-top:10px; }
+  .chip { background:var(--accent-soft); color:var(--ink); border-radius:20px; padding:3px 6px 3px 10px; font-size:13px; display:flex; align-items:center; gap:4px; }
+  .chip button { border:0; background:none; color:var(--muted); padding:0 4px; font-size:15px; line-height:1; }
+  .section-label { font-size:12px; text-transform:uppercase; letter-spacing:.05em; color:var(--faint); margin:18px 0 4px; font-weight:600; }
+  .note { background:var(--warn-soft); color:var(--warn); border-radius:8px; padding:8px 12px; font-size:13px; margin-top:10px; }
+  .toggle { display:flex; align-items:center; gap:8px; margin:8px 0; }
+  .toggle input { accent-color:var(--accent); width:16px; height:16px; }
+
+  /* toast */
+  #toasts { position:fixed; top:16px; left:50%; transform:translateX(-50%); align-items:center; display:flex; flex-direction:column; gap:8px; z-index:60; }
+  .toast { background:var(--ink); color:var(--bg); padding:10px 14px; border-radius:10px; font-size:14px; box-shadow:0 8px 24px rgba(0,0,0,.2); max-width:380px; }
+  .toast.err { background:var(--bad); color:#fff; }
+
+  /* login */
+  .login { min-height:100vh; display:grid; place-items:center; padding:16px; }
+  .login .card { width:min(420px, 100%); padding:28px; }
+  .login .brand { padding:0 0 14px; }
+  .login input { width:100%; margin:6px 0 10px; }
+  .login .btn { width:100%; padding:10px; }
+
+  @media (max-width: 860px) {
+    .shell { grid-template-columns:1fr; }
+    aside { position:static; height:auto; flex-direction:row; flex-wrap:wrap; align-items:center; padding:10px 12px; border-right:0; border-bottom:1px solid var(--line); }
+    .brand { padding:4px 8px; } .nav { display:flex; flex-wrap:wrap; gap:2px; } aside .foot { display:none; }
+    .nav a { padding:6px 8px; font-size:14px; } .nav .count { display:none; }
+    main { padding:18px 16px 60px; }
+    .grid4 { grid-template-columns:repeat(2, 1fr); }
+    .src { grid-template-columns:1fr; } .src .actions { justify-content:flex-start; }
+  }
 </style>
 </head>
 <body>
-<header>
-  <h1>Nous Drive Connectors</h1>
-  <nav id="nav">
-    <a data-tab="sources">Sources</a><a data-tab="connect-drive">Connect Drive</a><a data-tab="devices">Devices</a>
-    <a data-tab="people">People</a><a data-tab="keys">MCP keys</a><a data-tab="notifications">Notifications</a><a data-tab="changes">Changes</a>
-  </nav>
-  <span style="flex:1"></span>
-  <button class="ghost" id="logout">Sign out</button>
-</header>
-<main>
-  <section id="login" class="card hidden">
+
+<!-- ============ sign in ============ -->
+<div id="login" class="login hidden">
+  <div class="card">
+    <div class="brand"><div class="logo">N</div>Nous Drive</div>
     <h2>Sign in</h2>
-    <p class="muted">We’ll email you a one-time link. It expires in 30 minutes.</p>
-    <div class="row"><input id="email" type="email" size="36" placeholder="you@example.org"><button id="request-link">Email me a link</button></div>
-    <p id="login-msg" class="muted"></p>
-    <details style="margin-top:12px"><summary class="muted">Use an admin key instead</summary>
-      <div class="row" style="margin-top:8px"><input id="key" type="password" size="50" placeholder="nd_admin_…"><button id="signin" class="ghost">Sign in with key</button></div>
+    <p class="muted small">We’ll email you a one-time link. It expires in 30 minutes.</p>
+    <input id="email" type="email" placeholder="you@example.org" autocomplete="email">
+    <button class="btn" id="request-link">Email me a sign-in link</button>
+    <p id="login-msg" class="muted small"></p>
+    <details style="margin-top:14px"><summary class="muted small">Use an admin key instead</summary>
+      <input id="key" type="password" placeholder="nd_admin_…">
+      <button class="btn ghost" id="signin">Sign in with key</button>
     </details>
-  </section>
+  </div>
+</div>
 
-  <section data-panel="sources" class="hidden">
-    <div class="card"><div class="row" style="justify-content:space-between"><h2 style="margin:0">Sources</h2>
-      <button class="ghost" onclick="loadSources()">Refresh</button></div>
-      <table><thead><tr><th>Name</th><th>Type</th><th>Status</th><th>Indexed</th><th>Progress / health</th><th></th></tr></thead>
-      <tbody id="sources"></tbody></table></div>
-  </section>
+<!-- ============ app ============ -->
+<div id="app" class="shell hidden">
+  <aside>
+    <div class="brand"><div class="logo">N</div>Nous Drive</div>
+    <nav class="nav" id="nav">
+      <a data-page="overview"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>Overview</a>
+      <a data-page="drive"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M8 3h8l6 10-4 7H6l-4-7z"/><path d="M8 3l6 10H2M16 3l-6 10M22 13H10l-4 7"/></svg>Google Drive<span class="count" id="nav-drive"></span></a>
+      <a data-page="computers"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>Computers<span class="count" id="nav-computers"></span></a>
+      <a data-page="activity"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg>Activity</a>
+      <a data-page="claude"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M17 6l3 3M15 8l2 2"/></svg>Claude access</a>
+      <a data-page="people"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.5 3.4-5.5 6.5-5.5s5.7 2 6.5 5.5"/><path d="M16 4.5a3.5 3.5 0 010 7M18 14.8c1.8.8 3 2.6 3.5 5.2"/></svg>People</a>
+    </nav>
+    <div class="foot"><div id="who" class="small"></div><a href="#" id="logout" class="small">Sign out</a></div>
+  </aside>
 
-  <section data-panel="connect-drive" class="hidden">
-    <div class="card">
-      <h2>Connect Google Drive</h2>
-      <p class="muted">Sign in with Google (metadata-only access), then pick any mix of My Drive, folders and shared drives.</p>
-      <div class="row"><button onclick="startOAuth(false)">Connect a Google account</button>
-        <button class="ghost" onclick="startOAuth(true)">Connect with content access (Phase 2)</button></div>
-    </div>
-    <div class="card" id="connections-card"><h3>Connected Google accounts</h3><div id="connections"></div></div>
-    <div class="card hidden" id="picker">
-      <h3>Choose what to watch</h3>
-      <div id="picker-roots"></div>
-      <div class="muted" id="crumbs"></div>
-      <div id="picker-folders"></div>
-      <p><button onclick="createSources()">Index and watch selected</button> <span id="picked" class="muted"></span></p>
-    </div>
-  </section>
+  <main>
+    <!-- Overview -->
+    <section data-page="overview">
+      <div class="page-head"><div><h1>Overview</h1><p>Everything being indexed, and how it’s doing.</p></div></div>
+      <div class="grid4">
+        <div class="tile"><div class="v" id="t-files">—</div><div class="k">Files indexed</div></div>
+        <div class="tile"><div class="v" id="t-folders">—</div><div class="k">Folders</div></div>
+        <div class="tile"><div class="v" id="t-live">—</div><div class="k">Sources up to date</div></div>
+        <div class="tile"><div class="v" id="t-today">—</div><div class="k">Changes in 24 h</div></div>
+      </div>
+      <div class="card"><div class="card-head"><h2>All sources</h2></div><div id="ov-sources"></div></div>
+      <div class="card"><div class="card-head"><h2>Latest notifications</h2><a href="#activity" class="small">See all</a></div><div id="ov-notifs"></div></div>
+    </section>
 
-  <section data-panel="devices" class="hidden">
-    <div class="card"><h2>Pair a computer</h2>
-      <p class="muted">Install Nous Sync on the computer, then run the command shown.</p>
-      <div class="row"><input id="devname" placeholder="Device name, e.g. Nous MacBook Pro" size="36"><button onclick="pair()">Create pairing code</button></div>
-      <pre id="paircode" class="hidden"></pre></div>
-    <div class="card"><h3>Devices</h3><table><thead><tr><th>Name</th><th>OS</th><th>Agent</th><th>Last seen</th><th></th></tr></thead><tbody id="devices"></tbody></table></div>
-  </section>
+    <!-- Google Drive -->
+    <section data-page="drive" class="hidden">
+      <div class="page-head">
+        <div><h1>Google Drive</h1><p>Connected Google accounts and what’s watched in each.</p></div>
+        <div class="row"><button class="btn" onclick="connectDrive(false)">+ Connect Google account</button></div>
+      </div>
+      <div id="drive-list"></div>
+    </section>
 
-  <section data-panel="people" class="hidden">
-    <div class="card"><h2>People</h2>
-      <p class="muted">Anyone listed here can sign in with a magic link emailed to them.</p>
-      <div class="row"><input id="invite-email" type="email" placeholder="colleague@example.org" size="28">
-        <input id="invite-name" placeholder="Name (optional)" size="20">
-        <button onclick="inviteMember()">Invite</button></div>
-      <p id="invite-msg" class="muted"></p>
-      <table><thead><tr><th>Email</th><th>Name</th><th>Role</th><th></th></tr></thead><tbody id="members"></tbody></table></div>
-  </section>
+    <!-- Computers -->
+    <section data-page="computers" class="hidden">
+      <div class="page-head">
+        <div><h1>Computers</h1><p>Local folders watched by the Nous Sync app on each computer.</p></div>
+        <div class="row"><button class="btn" onclick="openPair()">+ Add a computer</button></div>
+      </div>
+      <div id="computers-list"></div>
+    </section>
 
-  <section data-panel="keys" class="hidden">
-    <div class="card"><h2>MCP session keys</h2>
-      <p class="muted">Each Claude session or MCP client gets its own key, so "what's new" checkpoints are kept per session. Create these from the web after signing in with email.</p>
-      <div class="row"><input id="keyname" placeholder="e.g. Claude Desktop – laptop" size="36"><button onclick="newKey()">Create key</button></div>
-      <pre id="newkey" class="hidden"></pre>
-      <table><thead><tr><th>Name</th><th>Kind</th><th>Prefix</th><th>Last used</th><th></th></tr></thead><tbody id="keys"></tbody></table></div>
-  </section>
+    <!-- Activity -->
+    <section data-page="activity" class="hidden">
+      <div class="page-head"><div><h1>Activity</h1><p>What changed, and what you were told about.</p></div>
+        <select id="act-since" onchange="loadActivity()"><option value="24h">Last 24 hours</option><option value="7d">Last 7 days</option><option value="30d">Last 30 days</option></select></div>
+      <div class="card">
+        <div class="tabs"><button data-tab="changes" class="on">Changes</button><button data-tab="notifications">Notifications</button></div>
+        <div id="act-changes"></div><div id="act-notifs" class="hidden"></div>
+      </div>
+    </section>
 
-  <section data-panel="notifications" class="hidden"><div class="card"><h2>Notifications</h2><div id="notifs"></div></div></section>
-  <section data-panel="changes" class="hidden"><div class="card"><h2>Changes (last 24h)</h2>
-    <table><thead><tr><th>When</th><th>Type</th><th>Path</th><th>Source</th></tr></thead><tbody id="changes"></tbody></table></div></section>
-</main>
+    <!-- Claude access -->
+    <section data-page="claude" class="hidden">
+      <div class="page-head"><div><h1>Claude access</h1><p>Let Claude (or any MCP client) read the index.</p></div></div>
+      <div class="card">
+        <h2>Create a key</h2>
+        <p class="muted small">One key per Claude session or app, so each keeps its own “what’s new since I last asked”.</p>
+        <div class="row"><input id="keyname" placeholder="e.g. Claude Desktop – MacBook" style="flex:1;min-width:220px"><button class="btn" onclick="newKey()">Create key</button></div>
+        <div id="newkey" class="hidden"></div>
+      </div>
+      <div class="card"><div class="card-head"><h2>Keys</h2></div><div class="table-wrap"><table><thead><tr><th>Name</th><th>Kind</th><th>Key</th><th>Last used</th><th></th></tr></thead><tbody id="keys"></tbody></table></div></div>
+    </section>
+
+    <!-- People -->
+    <section data-page="people" class="hidden">
+      <div class="page-head"><div><h1>People</h1><p>Anyone listed here can sign in with a link emailed to them.</p></div></div>
+      <div class="card">
+        <div class="row"><input id="invite-email" type="email" placeholder="colleague@example.org" style="flex:2;min-width:200px">
+          <input id="invite-name" placeholder="Name (optional)" style="flex:1;min-width:140px">
+          <button class="btn" onclick="inviteMember()">Invite</button></div>
+        <p id="invite-msg" class="muted small"></p>
+        <div class="table-wrap"><table><thead><tr><th>Email</th><th>Name</th><th>Role</th><th></th></tr></thead><tbody id="members"></tbody></table></div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div id="modal-root"></div>
+<div id="toasts"></div>
+
 <script>
+/* ---------------------------------------------------------------- basics */
 let KEY = null; try { KEY = localStorage.getItem("nd_key"); } catch (e) {}
-const $ = (s) => document.querySelector(s);
+const $ = (s, el = document) => el.querySelector(s);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-const when = (t) => t ? new Date(t).toLocaleString() : "—";
+const fmt = (n) => (n ?? 0).toLocaleString();
+function ago(t) {
+  if (!t) return "never"; const s = (Date.now() - new Date(t)) / 1000;
+  if (s < 60) return "just now"; if (s < 3600) return `${Math.round(s/60)} min ago`;
+  if (s < 86400) return `${Math.round(s/3600)} h ago`; return new Date(t).toLocaleDateString();
+}
+function toast(msg, err) {
+  const el = document.createElement("div"); el.className = "toast" + (err ? " err" : ""); el.textContent = msg;
+  $("#toasts").appendChild(el); setTimeout(() => el.remove(), err ? 7000 : 4000);
+}
 async function api(path, opts = {}) {
   const r = await fetch(path, {...opts, headers: {"Authorization": "Bearer " + KEY, "Content-Type": "application/json", ...(opts.headers||{})}});
-  if (r.status === 401) { showLogin(); throw new Error("unauthorised"); }
+  if (r.status === 401) { signOut(); throw new Error("Please sign in again"); }
   const body = await r.json().catch(() => ({}));
-  if (!r.ok) { alert(body.detail || r.statusText); throw new Error(body.detail); }
+  if (!r.ok) { const m = body.detail || r.statusText; toast(typeof m === "string" ? m : JSON.stringify(m), true); throw new Error(m); }
   return body;
 }
-function showLogin() { $("#login").classList.remove("hidden"); document.querySelectorAll("[data-panel]").forEach(p => p.classList.add("hidden")); $("#nav").classList.add("hidden"); }
-function hideLogin() { $("#login").classList.add("hidden"); $("#nav").classList.remove("hidden"); }
-$("#signin").onclick = async () => { KEY = $("#key").value.trim(); try { localStorage.setItem("nd_key", KEY); } catch (e) {} hideLogin(); route(); };
+
+/* ---------------------------------------------------------------- auth */
+function signOut() { try { localStorage.removeItem("nd_key"); } catch (e) {} KEY = null; showLogin(); }
+function showLogin() { $("#login").classList.remove("hidden"); $("#app").classList.add("hidden"); }
+function showApp() { $("#login").classList.add("hidden"); $("#app").classList.remove("hidden"); }
+$("#logout").onclick = (e) => { e.preventDefault(); signOut(); };
+$("#signin").onclick = () => { KEY = $("#key").value.trim(); try { localStorage.setItem("nd_key", KEY); } catch (e) {} route(); };
 $("#request-link").onclick = async () => {
-  const email = $("#email").value.trim();
-  if (!email) return;
+  const email = $("#email").value.trim(); if (!email) return;
   $("#login-msg").textContent = "Sending…";
   const r = await fetch("/api/auth/request-link", {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({email})});
   const body = await r.json().catch(() => ({}));
-  if (!r.ok) { $("#login-msg").textContent = body.detail || "Could not send link"; return; }
-  let msg = "If that address is on this account, a sign-in link is on its way.";
+  if (!r.ok) { $("#login-msg").textContent = body.detail || "Could not send the link"; return; }
+  let msg = "If that address has access, a sign-in link is on its way.";
   if (body.dev_links && body.dev_links.length) msg += " Dev link: " + body.dev_links[0].url;
   $("#login-msg").textContent = msg;
 };
-$("#logout").onclick = () => { try { localStorage.removeItem("nd_key"); } catch (e) {} KEY = null; showLogin(); };
-document.querySelectorAll("#nav a").forEach(a => a.onclick = () => { location.hash = a.dataset.tab; });
+
+/* ---------------------------------------------------------------- routing */
+const PAGES = ["overview", "drive", "computers", "activity", "claude", "people"];
+let PAGE = "overview", timer = null;
+document.querySelectorAll("#nav a").forEach(a => a.onclick = () => { location.hash = a.dataset.page; });
 window.addEventListener("hashchange", route);
 
-function route() {
-  const h = location.hash.slice(1);
+async function route() {
+  const h = decodeURIComponent(location.hash.slice(1));
   if (h.startsWith("session=")) {
-    KEY = decodeURIComponent(h.slice("session=".length));
-    try { localStorage.setItem("nd_key", KEY); } catch (e) {}
-    history.replaceState(null, "", "/app#sources");
-    hideLogin(); return route();
+    KEY = h.slice(8); try { localStorage.setItem("nd_key", KEY); } catch (e) {}
+    history.replaceState(null, "", "/app#overview"); return route();
   }
   if (!KEY) return showLogin();
-  hideLogin();
-  if (h.startsWith("pick-roots=")) { show("connect-drive"); return openPicker(h.split("=")[1]); }
-  if (h.startsWith("error=")) alert(decodeURIComponent(h.split("=")[1]));
-  const tab = ["sources","connect-drive","devices","people","keys","notifications","changes"].includes(h) ? h : "sources";
-  show(tab);
-  ({sources: loadSources, "connect-drive": loadConnections, devices: loadDevices, people: loadMembers, keys: loadKeys,
-    notifications: loadNotifs, changes: loadChanges})[tab]();
-}
-function show(tab) {
-  document.querySelectorAll("[data-panel]").forEach(p => p.classList.toggle("hidden", p.dataset.panel !== tab));
-  document.querySelectorAll("#nav a").forEach(a => a.classList.toggle("on", a.dataset.tab === tab));
+  showApp();
+  if (h.startsWith("error=")) { toast(h.slice(6), true); history.replaceState(null, "", "/app#drive"); }
+  let page = h.split("/")[0];
+  if (h.startsWith("pick-roots=")) { page = "drive"; openSelection(h.split("=")[1]); history.replaceState(null, "", "/app#drive"); }
+  if (h.startsWith("drive/connected=")) {
+    const conn = h.split("=")[1]; history.replaceState(null, "", "/app#drive");
+    toast("Google account connected. Indexing your whole My Drive — you can narrow it to folders.");
+    setTimeout(() => openSelection(conn, true), 300);
+  }
+  PAGE = PAGES.includes(page) ? page : "overview";
+  document.querySelectorAll("main > section").forEach(s => s.classList.toggle("hidden", s.dataset.page !== PAGE));
+  document.querySelectorAll("#nav a").forEach(a => a.classList.toggle("on", a.dataset.page === PAGE));
+  if (!$("#who").textContent) api("/api/me").then(r => $("#who").textContent = r.account?.name || "").catch(() => {});
+  refresh();
 }
 
-async function loadSources() {
+/* Live refresh: fast while anything is scanning, slower when idle. */
+async function refresh() {
+  clearTimeout(timer);
+  let busy = false;
+  try {
+    busy = await ({overview: loadOverview, drive: loadDrive, computers: loadComputers, activity: loadActivity,
+                   claude: loadKeys, people: loadMembers})[PAGE]();
+  } catch (e) { /* toast already shown */ }
+  timer = setTimeout(refresh, busy ? 2500 : 15000);
+}
+document.addEventListener("visibilitychange", () => { if (!document.hidden && KEY) refresh(); });
+
+/* ---------------------------------------------------------------- shared: sources */
+let STATE = {sources: [], status: {}};
+async function loadSourceState() {
   const [list, st] = await Promise.all([api("/api/sources"), api("/api/status")]);
-  const health = Object.fromEntries(st.sources.map(s => [s.source_id, s]));
-  $("#sources").innerHTML = list.sources.map(s => {
-    const h = health[s.id] || {}; const p = h.scan_progress || {};
-    let prog = p.state === "running" ? `Scanning… ${p.folders||0} folders, ${p.files||0} files` :
-               (h.lag_seconds != null ? `synced ${Math.round(h.lag_seconds/60)} min ago` : "");
-    if (h.device) prog += ` · ${h.device.online ? "device online" : "device offline"}`;
-    if (h.push_channel) prog += h.push_channel.active ? " · push on" : " · polling";
-    if (h.queue && h.queue.dead_letter) prog += ` · <span class="error">${h.queue.dead_letter} failed jobs</span>`;
-    if (s.status_reason) prog += `<br><span class="muted">${esc(s.status_reason)}</span>`;
-    const paused = s.status === "paused";
-    return `<tr><td><b>${esc(s.name)}</b><br><span class="muted">${esc(s.device || s.root_kind)}</span></td>
-      <td>${s.type === "gdrive" ? "Google Drive" : "Local folder"}</td>
-      <td><span class="pill ${s.status}">${s.status}</span></td>
-      <td>${s.files} files<br><span class="muted">${s.folders} folders · ${s.total_size}</span></td>
-      <td>${prog}</td>
-      <td class="row"><button class="ghost" onclick="act('${s.id}','${paused ? "resume" : "pause"}')">${paused ? "Resume" : "Pause"}</button>
-        <button class="ghost" onclick="act('${s.id}','resync')">Resync</button>
-        <button class="ghost" onclick="toggleNotif('${s.id}')">Notifications</button>
-        <button class="danger" onclick="removeSource('${s.id}','${esc(s.name)}')">Remove</button></td></tr>`;
-  }).join("") || `<tr><td colspan=6 class="muted">No sources yet. Connect a Drive or pair a computer.</td></tr>`;
-}
-async function act(id, a) { await api(`/api/sources/${id}/${a}`, {method: "POST"}); loadSources(); }
-async function removeSource(id, name) { if (confirm(`Remove "${name}"? Its index rows are deleted and tokens revoked.`)) { await api(`/api/sources/${id}`, {method:"DELETE"}); loadSources(); } }
-async function toggleNotif(id) {
-  const on = confirm("Send notifications for this source? (OK = on, Cancel = off)");
-  const types = on ? (prompt("Change types to notify (comma separated): added, modified, moved, deleted", "added") || "added") : "added";
-  await api(`/api/sources/${id}/settings`, {method: "PATCH", body: JSON.stringify({notifications: {enabled: on, types: types.split(",").map(t => t.trim()).filter(Boolean)}})});
+  STATE.sources = list.sources;
+  STATE.status = Object.fromEntries(st.sources.map(s => [s.source_id, s]));
+  const drive = list.sources.filter(s => s.type === "gdrive").length, local = list.sources.length - drive;
+  $("#nav-drive").textContent = drive || ""; $("#nav-computers").textContent = local || "";
+  return list.sources.some(s => (STATE.status[s.id]?.progress || {}).running || ["connecting", "initial_scan"].includes(s.status));
 }
 
-async function startOAuth(content) { const r = await api(`/api/oauth/google/start?content=${content}`); location.href = r.url; }
-async function loadConnections() {
-  const r = await api("/api/connections");
-  $("#connections").innerHTML = r.connections.filter(c => !c.revoked_at).map(c =>
-    `<div class="row" style="margin:6px 0"><b>${esc(c.google_email || c.id)}</b><span class="muted">${c.scopes.some(s => s.endsWith("drive.readonly")) ? "content access" : "metadata only"}</span>
-     <button class="ghost" onclick="location.hash='pick-roots=${c.id}'">Add roots</button></div>`).join("") || `<span class="muted">None yet.</span>`;
-}
-let PICK = {conn: null, chosen: new Map(), stack: []};
-async function openPicker(conn) {
-  PICK = {conn, chosen: new Map(), stack: []};
-  $("#picker").classList.remove("hidden");
-  const r = await api(`/api/connections/${conn}/roots`);
-  const roots = [r.my_drive, ...r.shared_drives];
-  $("#picker-roots").innerHTML = roots.map(x => `<div class="row" style="margin:4px 0"><label><input type="checkbox" data-root='${esc(JSON.stringify(x))}' onchange="pickToggle(this)"> ${esc(x.name)}</label>
-     <span class="muted">${x.kind === "my_drive" ? "My Drive" : "shared drive"}</span>
-     <button class="ghost" onclick='browse(${JSON.stringify(x.id)}, ${JSON.stringify(x.name)}, true)'>Browse folders</button></div>`).join("");
-  $("#picker-folders").innerHTML = ""; updatePicked();
-}
-async function browse(id, name, reset) {
-  if (reset) PICK.stack = [];
-  PICK.stack.push({id, name});
-  $("#crumbs").innerHTML = PICK.stack.map((s, i) => `<a style="cursor:pointer" onclick="back(${i})">${esc(s.name)}</a>`).join(" / ");
-  const r = await api(`/api/connections/${PICK.conn}/roots?parent=${encodeURIComponent(id)}`);
-  $("#picker-folders").innerHTML = r.folders.map(f => `<div class="row" style="margin:3px 0 3px 12px"><label><input type="checkbox" data-root='${esc(JSON.stringify(f))}' ${PICK.chosen.has(f.id) ? "checked" : ""} onchange="pickToggle(this)"> 📁 ${esc(f.name)}</label>
-     <button class="ghost" onclick='browse(${JSON.stringify(f.id)}, ${JSON.stringify(f.name)})'>Open</button></div>`).join("") || `<div class="muted">No subfolders.</div>`;
-}
-function back(i) { const s = PICK.stack[i]; PICK.stack = PICK.stack.slice(0, i); browse(s.id, s.name); }
-function pickToggle(el) { const r = JSON.parse(el.dataset.root); el.checked ? PICK.chosen.set(r.id, r) : PICK.chosen.delete(r.id); updatePicked(); }
-function updatePicked() { $("#picked").textContent = PICK.chosen.size ? `${PICK.chosen.size} selected: ` + [...PICK.chosen.values()].map(r => r.name).join(", ") : ""; }
-async function createSources() {
-  if (!PICK.chosen.size) return alert("Select at least one root");
-  const r = await api(`/api/connections/${PICK.conn}/sources`, {method: "POST", body: JSON.stringify({roots: [...PICK.chosen.values()]})});
-  alert(`Added ${r.created.length} source(s). The first full index starts now.`); location.hash = "sources";
+function progressHTML(s) {
+  const h = STATE.status[s.id] || {}; const p = h.progress || {phase: "live", percent: 100, label: "Up to date"};
+  let cls = "bar", width = p.percent ?? 0;
+  if (p.phase === "live") { cls += " done"; width = 100; }
+  else if (p.percent == null || p.phase === "counting" || p.phase === "queued" || p.phase === "starting" || p.phase === "waiting_for_device") cls += " indet";
+  const pct = p.phase === "live" ? "" : (p.percent != null && !cls.includes("indet") ? `<b>${p.percent}%</b>` : "");
+  let right = pct;
+  if (p.phase === "live") right = `synced ${ago(h.last_successful_sync)}${h.push_channel ? (h.push_channel.active ? " · instant updates" : " · checks every few minutes") : ""}`;
+  if (p.phase === "paused" || p.phase === "error") { cls = "bar"; width = 0; }
+  return `<div class="prog"><div class="${cls}" role="progressbar" aria-valuemin="0" aria-valuemax="100" ${p.percent != null ? `aria-valuenow="${p.percent}"` : ""}><i style="width:${width}%"></i></div>
+    <div class="prog-label"><span>${esc(p.label)}</span><span>${right}</span></div></div>`;
 }
 
-async function pair() {
-  const r = await api("/api/devices/pairing-codes", {method: "POST", body: JSON.stringify({name: $("#devname").value || null})});
-  $("#paircode").classList.remove("hidden");
-  $("#paircode").textContent = `Pairing code: ${r.code} (valid ${r.expires_in_minutes} minutes)\n\n${r.instructions}\nnous-sync add ~/Footage`;
+function countsText(s, h) {
+  const p = h.progress || {};
+  if (p.running && p.done != null) return `${fmt(p.done)} items indexed so far`;
+  return `${fmt(s.files)} files · ${fmt(s.folders)} folders · ${esc(s.total_size)}`;
 }
-async function loadDevices() {
-  const r = await api("/api/devices");
-  $("#devices").innerHTML = r.devices.map(d => `<tr><td><b>${esc(d.name)}</b><br><span class="muted">${esc(d.hostname)}</span></td><td>${esc(d.os)}</td>
-    <td>${esc(d.agent_version)}</td><td>${d.revoked_at ? '<span class="pill error">revoked</span>' : (d.online ? '<span class="pill live">online</span>' : when(d.last_seen_at))}</td>
-    <td class="row"><button class="ghost" onclick="renameDevice('${d.id}','${esc(d.name)}')">Rename</button>${d.revoked_at ? "" : `<button class="danger" onclick="revokeDevice('${d.id}')">Revoke</button>`}</td></tr>`).join("");
+function sourceRow(s, opts = {}) {
+  const h = STATE.status[s.id] || {}; const paused = s.status === "paused";
+  const warn = [];
+  if (h.queue?.dead_letter) warn.push(`<span class="pill error">${h.queue.dead_letter} failed job${h.queue.dead_letter > 1 ? "s" : ""}</span>`);
+  if (s.status_reason && !["live", "initial_scan"].includes(s.status)) warn.push(`<span class="small muted">${esc(s.status_reason)}</span>`);
+  const icon = s.root_kind === "my_drive" ? "🗂️" : s.root_kind === "shared_drive" ? "👥" : "📁";
+  return `<div class="src">
+    <div><div class="name">${icon} ${esc(s.name)} <span class="pill ${s.status}">${s.status.replace("_", " ")}</span> ${warn.join(" ")}</div>
+      <div class="meta">${countsText(s, h)}${opts.showType ? ` · ${s.type === "gdrive" ? "Google Drive" : esc(s.device || "Computer")}` : ""}${s.type === "local" ? ` · <span class="mono">${esc(s.root)}</span>` : ""}</div></div>
+    <div class="actions">
+      <button class="btn ghost sm" onclick="act('${s.id}','${paused ? "resume" : "pause"}')">${paused ? "Resume" : "Pause"}</button>
+      <button class="btn ghost sm" onclick="act('${s.id}','resync')" title="Re-check everything">Re-scan</button>
+      <button class="btn ghost sm" onclick="openNotifySettings('${s.id}')">Alerts</button>
+      ${opts.noRemove ? "" : `<button class="btn danger sm" onclick="removeSource('${s.id}')">Remove</button>`}
+    </div>
+    ${progressHTML(s)}</div>`;
 }
-async function renameDevice(id, name) { const n = prompt("Device name", name); if (n) { await api(`/api/devices/${id}`, {method: "PATCH", body: JSON.stringify({name: n})}); loadDevices(); } }
-async function revokeDevice(id) { if (confirm("Revoke this device's token?")) { await api(`/api/devices/${id}`, {method: "DELETE"}); loadDevices(); } }
+async function act(id, a) {
+  await api(`/api/sources/${id}/${a}`, {method: "POST"});
+  toast({pause: "Paused", resume: "Resumed — catching up", resync: "Full re-scan started"}[a]); refresh();
+}
+async function removeSource(id) {
+  const s = STATE.sources.find(x => x.id === id);
+  if (!await confirmModal("Remove from the index?", `“${s.name}” will stop being watched and its entries will be deleted from the index. Nothing is deleted from ${s.type === "gdrive" ? "Google Drive" : "the computer"}.`, "Remove")) return;
+  await api(`/api/sources/${id}`, {method: "DELETE"}); toast("Removed"); refresh();
+}
 
+/* ---------------------------------------------------------------- overview */
+async function loadOverview() {
+  const busy = await loadSourceState();
+  const files = STATE.sources.reduce((a, s) => a + s.files, 0), folders = STATE.sources.reduce((a, s) => a + s.folders, 0);
+  $("#t-files").textContent = fmt(files); $("#t-folders").textContent = fmt(folders);
+  $("#t-live").textContent = `${STATE.sources.filter(s => s.status === "live").length} / ${STATE.sources.length}`;
+  api("/api/changes?since=24h&limit=1").then(r => $("#t-today").textContent = fmt(r.total) + (r.total_is_lower_bound ? "+" : ""));
+  $("#ov-sources").innerHTML = STATE.sources.length ? STATE.sources.map(s => sourceRow(s, {showType: true, noRemove: true})).join("")
+    : `<div class="empty"><div class="big">🗂️</div>Nothing connected yet.<div class="row" style="justify-content:center;margin-top:12px">
+        <button class="btn" onclick="connectDrive(false)">Connect Google Drive</button><button class="btn ghost" onclick="location.hash='computers'">Add a computer</button></div></div>`;
+  const n = await api("/api/notifications?limit=5");
+  $("#ov-notifs").innerHTML = notifsHTML(n.notifications) || `<div class="muted small">No notifications yet.</div>`;
+  return busy;
+}
+
+/* ---------------------------------------------------------------- google drive */
+async function connectDrive(content) { const r = await api(`/api/oauth/google/start?content=${content}`); location.href = r.url; }
+async function loadDrive() {
+  const [busy, conns] = await Promise.all([loadSourceState(), api("/api/connections")]);
+  const active = conns.connections.filter(c => !c.revoked_at);
+  const sel = await Promise.all(active.map(c => api(`/api/connections/${c.id}/selection`)));
+  if (!active.length) {
+    $("#drive-list").innerHTML = `<div class="card empty"><div class="big">🔗</div><h2>Connect a Google account</h2>
+      <p>Sign in with Google (read-only access to file names and folders). Your whole My Drive is indexed straight away; you can narrow it to specific folders or add shared drives.</p>
+      <button class="btn" onclick="connectDrive(false)">Connect Google account</button></div>`;
+    return busy;
+  }
+  $("#drive-list").innerHTML = active.map((c, i) => {
+    const ids = new Set(sel[i].roots.map(r => r.source_id));
+    const srcs = STATE.sources.filter(s => ids.has(s.id));
+    const content = c.scopes.some(s => s.endsWith("drive.readonly"));
+    return `<div class="card"><div class="card-head">
+        <div><h2>${esc(c.google_email || "Google account")}</h2>
+          <div class="small muted">${content ? "Names, folders and file contents" : "Names and folders only (read-only)"} · connected ${ago(c.created_at)}</div></div>
+        <div class="row"><button class="btn" onclick="openSelection('${c.id}')">Choose what’s watched</button>
+          ${content ? "" : `<button class="btn ghost sm" onclick="connectDrive(true)" title="Needed only for content search and summaries">Allow content access</button>`}</div></div>
+      ${srcs.length ? srcs.map(s => sourceRow(s)).join("") : `<div class="muted">Nothing watched for this account. <a href="#" onclick="openSelection('${c.id}');return false">Choose folders</a></div>`}
+    </div>`;
+  }).join("");
+  return busy;
+}
+
+/* ---- selection modal: whole My Drive / specific folders / shared drives */
+let SEL = null;
+async function openSelection(conn, justConnected) {
+  const [roots, current, conns] = await Promise.all([api(`/api/connections/${conn}/roots`), api(`/api/connections/${conn}/selection`), api("/api/connections")]);
+  const c = conns.connections.find(x => x.id === conn) || {};
+  const cur = current.roots;
+  const myRoot = roots.my_drive;
+  const wholeMy = cur.length === 0 || cur.some(r => r.kind === "my_drive");
+  SEL = {conn, myRoot, shared: roots.shared_drives, mode: wholeMy ? "whole" : "folders",
+         folders: new Map(cur.filter(r => r.kind === "folder").map(r => [r.id, {kind: "folder", id: r.id, name: r.name}])),
+         drives: new Set(cur.filter(r => r.kind === "shared_drive").map(r => r.id)), initial: JSON.stringify(cur.map(r => r.id).sort())};
+  modal(`<header><h2>What should we watch${c.google_email ? ` in ${esc(c.google_email)}` : ""}?</h2>
+      <p>${justConnected ? "Your whole My Drive is already being indexed. Keep it, or pick specific folders instead." : "Changes take effect right away. Nothing in Google Drive is ever modified."}</p></header>
+    <div class="body">
+      <div class="section-label">My Drive</div>
+      <label class="choice ${SEL.mode === "whole" ? "on" : ""}" id="ch-whole"><input type="radio" name="mode" value="whole" ${SEL.mode === "whole" ? "checked" : ""}>
+        <div><div class="ttl">Whole My Drive</div><div class="sub">Every file and folder in My Drive, plus files shared with you. Recommended.</div></div></label>
+      <label class="choice ${SEL.mode === "folders" ? "on" : ""}" id="ch-folders"><input type="radio" name="mode" value="folders" ${SEL.mode === "folders" ? "checked" : ""}>
+        <div style="flex:1;min-width:0"><div class="ttl">Only specific folders</div><div class="sub">Pick the folders to index; everything inside them is included.</div>
+          <div id="folder-picker" class="${SEL.mode === "folders" ? "" : "hidden"}"><div class="tree" id="tree"></div><div class="chips" id="chips"></div></div></div></label>
+      ${SEL.shared.length ? `<div class="section-label">Shared drives</div>
+        ${SEL.shared.map(d => `<label class="choice ${SEL.drives.has(d.id) ? "on" : ""}"><input type="checkbox" data-drive="${esc(d.id)}" ${SEL.drives.has(d.id) ? "checked" : ""}>
+          <div><div class="ttl">👥 ${esc(d.name)}</div><div class="sub">The whole shared drive</div></div></label>`).join("")}` : ""}
+      <div id="sel-warn"></div>
+    </div>
+    <footer><span class="small muted" id="sel-summary"></span>
+      <div class="row"><button class="btn ghost" onclick="closeModal()">${justConnected ? "Keep whole My Drive" : "Cancel"}</button><button class="btn" id="sel-save">Save</button></div></footer>`);
+  document.querySelectorAll("input[name=mode]").forEach(r => r.onchange = () => {
+    SEL.mode = r.value; $("#ch-whole").classList.toggle("on", SEL.mode === "whole"); $("#ch-folders").classList.toggle("on", SEL.mode === "folders");
+    $("#folder-picker").classList.toggle("hidden", SEL.mode !== "folders"); if (SEL.mode === "folders" && !$("#tree").children.length) loadTree(); updateSel();
+  });
+  document.querySelectorAll("input[data-drive]").forEach(cb => cb.onchange = () => {
+    cb.checked ? SEL.drives.add(cb.dataset.drive) : SEL.drives.delete(cb.dataset.drive); cb.closest(".choice").classList.toggle("on", cb.checked); updateSel();
+  });
+  $("#sel-save").onclick = saveSelection;
+  if (SEL.mode === "folders") loadTree();
+  updateSel();
+}
+async function loadTree() { $("#tree").innerHTML = `<div class="small muted" style="padding:8px">Loading folders…</div>`; $("#tree").innerHTML = await folderNodes(SEL.myRoot.id); }
+async function folderNodes(parent) {
+  const r = await api(`/api/connections/${SEL.conn}/roots?parent=${encodeURIComponent(parent)}`);
+  if (!r.folders.length) return `<div class="small faint" style="padding:4px 8px">No folders here</div>`;
+  return r.folders.map(f => `<div class="node" data-id="${esc(f.id)}"><div class="line">
+      <button class="chev" title="Show subfolders" onclick="toggleNode(this, event)"><svg width="12" height="12" viewBox="0 0 12 12"><path d="M4 2l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg></button>
+      <label><input type="checkbox" data-folder='${esc(JSON.stringify(f))}' ${SEL.folders.has(f.id) ? "checked" : ""} onchange="pickFolder(this)"> 📁 <span>${esc(f.name)}</span></label></div>
+    <div class="kids hidden"></div></div>`).join("");
+}
+async function toggleNode(btn, ev) {
+  ev.preventDefault(); ev.stopPropagation();
+  const node = btn.closest(".node"), kids = $(".kids", node);
+  if (kids.classList.toggle("hidden")) { btn.classList.remove("open"); return; }
+  btn.classList.add("open");
+  if (!kids.dataset.loaded) { kids.innerHTML = `<div class="small faint" style="padding:4px 8px">Loading…</div>`; kids.innerHTML = await folderNodes(node.dataset.id); kids.dataset.loaded = "1"; syncCovered(); }
+}
+function pickFolder(cb) {
+  const f = JSON.parse(cb.dataset.folder);
+  if (cb.checked) {
+    SEL.folders.set(f.id, f);
+    // Everything inside is already included: drop any subfolders picked earlier.
+    cb.closest(".node").querySelectorAll(".kids .node").forEach(n => SEL.folders.delete(n.dataset.id));
+  } else SEL.folders.delete(f.id);
+  syncCovered(); updateSel();
+}
+function syncCovered() {
+  document.querySelectorAll("#tree .node").forEach(n => {
+    const covered = !!n.parentElement.closest(".node") && [...ancestors(n)].some(a => SEL.folders.has(a.dataset.id));
+    const cb = n.querySelector(":scope > .line input");
+    cb.disabled = covered; if (covered) cb.checked = true; else cb.checked = SEL.folders.has(n.dataset.id);
+    n.querySelector(":scope > .line").title = covered ? "Included because a parent folder is selected" : "";
+  });
+}
+function* ancestors(n) { let a = n.parentElement.closest(".node"); while (a) { yield a; a = a.parentElement.closest(".node"); } }
+function unpick(id) { SEL.folders.delete(id); syncCovered(); updateSel(); }
+function selRoots() {
+  const roots = SEL.mode === "whole" ? [{kind: "my_drive", id: SEL.myRoot.id, name: "My Drive"}] : [...SEL.folders.values()];
+  return roots.concat(SEL.shared.filter(d => SEL.drives.has(d.id)).map(d => ({kind: "shared_drive", id: d.id, name: d.name})));
+}
+function updateSel() {
+  const chips = $("#chips");
+  if (chips) chips.innerHTML = [...SEL.folders.values()].map(f => `<span class="chip">📁 ${esc(f.name)}<button onclick="unpick('${esc(f.id)}');event.preventDefault()" aria-label="Remove">×</button></span>`).join("");
+  const roots = selRoots();
+  const parts = [];
+  if (SEL.mode === "whole") parts.push("Whole My Drive"); else parts.push(`${SEL.folders.size} folder${SEL.folders.size === 1 ? "" : "s"}`);
+  if (SEL.drives.size) parts.push(`${SEL.drives.size} shared drive${SEL.drives.size === 1 ? "" : "s"}`);
+  $("#sel-summary").textContent = parts.join(" + ");
+  const was = JSON.parse(SEL.initial);
+  const dropping = was.filter(id => !roots.some(r => r.id === id));
+  $("#sel-warn").innerHTML = dropping.length ? `<div class="note">${dropping.length} currently watched location${dropping.length > 1 ? "s" : ""} will stop being watched and ${dropping.length > 1 ? "their" : "its"} entries will be removed from the index.</div>` : "";
+  $("#sel-save").disabled = !roots.length;
+}
+async function saveSelection() {
+  const roots = selRoots(); if (!roots.length) return;
+  $("#sel-save").disabled = true; $("#sel-save").textContent = "Saving…";
+  try {
+    const r = await api(`/api/connections/${SEL.conn}/selection`, {method: "PUT", body: JSON.stringify({roots})});
+    closeModal();
+    toast(r.added.length ? `Indexing started for ${r.added.map(a => a.name).join(", ")}` : "Saved"); refresh();
+  } catch (e) { $("#sel-save").disabled = false; $("#sel-save").textContent = "Save"; }
+}
+
+/* ---------------------------------------------------------------- computers */
+async function loadComputers() {
+  const [busy, devs] = await Promise.all([loadSourceState(), api("/api/devices")]);
+  const locals = STATE.sources.filter(s => s.type === "local");
+  const devices = devs.devices.filter(d => !d.revoked_at);
+  if (!devices.length) {
+    $("#computers-list").innerHTML = `<div class="card empty"><div class="big">💻</div><h2>Add a computer</h2>
+      <p>Install the small Nous Sync app on a Mac, Windows or Linux computer to index local folders and external drives. Only names, sizes and dates are sent — never file contents.</p>
+      <button class="btn" onclick="openPair()">Add a computer</button></div>`;
+    return busy;
+  }
+  $("#computers-list").innerHTML = devices.map(d => {
+    const srcs = locals.filter(s => s.device === d.name);
+    return `<div class="card"><div class="card-head">
+        <div><h2><span class="dot ${d.online ? "on" : ""}"></span> ${esc(d.name)}</h2>
+          <div class="small muted">${d.online ? "Online" : `Last seen ${ago(d.last_seen_at)}`} · ${esc(d.os || "")}${d.agent_version ? ` · Nous Sync ${esc(d.agent_version)}` : ""}</div></div>
+        <div class="row"><button class="btn ghost sm" onclick="renameDevice('${d.id}')">Rename</button><button class="btn danger sm" onclick="revokeDevice('${d.id}')">Disconnect</button></div></div>
+      ${srcs.length ? srcs.map(s => sourceRow(s)).join("") : `<div class="muted small">No folders yet. On this computer run <code>nous-sync add ~/Footage</code></div>`}
+    </div>`;
+  }).join("");
+  return busy;
+}
+async function openPair() {
+  modal(`<header><h2>Add a computer</h2><p>Give it a name you’ll recognise, then run one command on that computer.</p></header>
+    <div class="body"><input id="devname" placeholder="e.g. Nous MacBook Pro" style="width:100%"><div id="pair-out"></div></div>
+    <footer><span></span><div class="row"><button class="btn ghost" onclick="closeModal()">Close</button><button class="btn" id="pair-go">Create pairing code</button></div></footer>`);
+  $("#devname").focus();
+  $("#pair-go").onclick = async () => {
+    const r = await api("/api/devices/pairing-codes", {method: "POST", body: JSON.stringify({name: $("#devname").value || null})});
+    const server = location.origin;
+    $("#pair-out").innerHTML = `<p class="small muted" style="margin-top:14px">Pairing code <b class="mono">${esc(r.code)}</b> — valid for ${r.expires_in_minutes} minutes.</p>
+      <div class="section-label">1 · Install Nous Sync (Mac / Linux)</div><pre class="box">agent/installers/install.sh --code ${esc(r.code)} --server ${esc(server)}${$("#devname").value ? ` --name "${esc($("#devname").value)}"` : ""}</pre>
+      <div class="small muted">Windows: <code>agent\\installers\\install.ps1 -Code ${esc(r.code)} -Server ${esc(server)}</code></div>
+      <div class="section-label">Already installed? Pair and add folders</div><pre class="box">nous-sync pair ${esc(r.code)} --server ${esc(server)}\nnous-sync add ~/Footage</pre>
+      <p class="small muted">The computer appears here as soon as it connects.</p>`;
+    $("#pair-go").classList.add("hidden");
+  };
+}
+async function renameDevice(id) {
+  const n = await promptModal("Rename computer", "Name", ""); if (!n) return;
+  await api(`/api/devices/${id}`, {method: "PATCH", body: JSON.stringify({name: n})}); refresh();
+}
+async function revokeDevice(id) {
+  if (!await confirmModal("Disconnect this computer?", "Its access token stops working. Its folders stay in the index until you remove them.", "Disconnect")) return;
+  await api(`/api/devices/${id}`, {method: "DELETE"}); refresh();
+}
+
+/* ---------------------------------------------------------------- activity */
+let ACT_TAB = "changes";
+document.querySelectorAll(".tabs button").forEach(b => b.onclick = () => {
+  ACT_TAB = b.dataset.tab; document.querySelectorAll(".tabs button").forEach(x => x.classList.toggle("on", x === b));
+  $("#act-changes").classList.toggle("hidden", ACT_TAB !== "changes"); $("#act-notifs").classList.toggle("hidden", ACT_TAB !== "notifications"); loadActivity();
+});
+function notifsHTML(list) {
+  return list.map(n => `<div style="padding:10px 0;border-bottom:1px solid var(--line)"><div class="row" style="justify-content:space-between">
+    <b>${esc(n.title)}</b><span class="small muted">${n.kind === "alert" ? '<span class="pill error">alert</span> ' : ""}${ago(n.created_at)}</span></div>
+    <div class="small muted" style="white-space:pre-line;margin-top:2px">${esc(n.body)}</div></div>`).join("");
+}
+async function loadActivity() {
+  const since = $("#act-since").value;
+  if (ACT_TAB === "changes") {
+    const r = await api(`/api/changes?since=${since}&limit=200`);
+    $("#act-changes").innerHTML = r.changes.map(c => `<div class="change"><span class="t ${c.type}">${c.type}</span>
+      <div><div>${esc(c.path || c.name)}</div>${c.from ? `<div class="small muted">from ${esc(c.from)}</div>` : ""}</div>
+      <div class="small muted" style="text-align:right">${esc(c.source)}${c.device ? ` · ${esc(c.device)}` : ""}<br>${ago(c.detected_at)}</div></div>`).join("")
+      || `<div class="empty">No changes in this period.</div>`;
+  } else {
+    const r = await api("/api/notifications?limit=100");
+    $("#act-notifs").innerHTML = notifsHTML(r.notifications) || `<div class="empty">No notifications yet.</div>`;
+  }
+  return false;
+}
+
+/* ---- per-source notification settings */
+async function openNotifySettings(id) {
+  const s = STATE.sources.find(x => x.id === id);
+  modal(`<header><h2>Alerts for ${esc(s.name)}</h2><p>New files are announced in batches (one message per upload, not per file).</p></header>
+    <div class="body">
+      <label class="toggle"><input type="checkbox" id="n-on" checked> Send notifications for this source</label>
+      <div class="section-label">Tell me when files are</div>
+      ${["added", "modified", "moved", "renamed", "deleted"].map(t => `<label class="toggle"><input type="checkbox" class="n-type" value="${t}" ${t === "added" ? "checked" : ""}> ${t}</label>`).join("")}
+      <div class="section-label">Quiet folders (one path per line)</div>
+      <textarea id="n-quiet" rows="3" style="width:100%" placeholder="/Render Cache"></textarea>
+    </div>
+    <footer><span></span><div class="row"><button class="btn ghost" onclick="closeModal()">Cancel</button><button class="btn" id="n-save">Save</button></div></footer>`);
+  $("#n-save").onclick = async () => {
+    const types = [...document.querySelectorAll(".n-type:checked")].map(c => c.value);
+    const quiet = $("#n-quiet").value.split("\n").map(x => x.trim()).filter(Boolean);
+    await api(`/api/sources/${id}/settings`, {method: "PATCH", body: JSON.stringify({notifications: {enabled: $("#n-on").checked, types, quiet_folders: quiet}})});
+    closeModal(); toast("Alert settings saved");
+  };
+}
+
+/* ---------------------------------------------------------------- claude access */
+async function newKey() {
+  const name = $("#keyname").value.trim() || "Claude session";
+  const r = await api("/api/keys", {method: "POST", body: JSON.stringify({name, kind: "session"})});
+  const cfg = JSON.stringify({mcpServers: {"nous-drive": {command: "nous-drive", args: ["mcp"], env: {NOUS_DRIVE_DATABASE_URL: "postgresql://…", NOUS_DRIVE_API_KEY: r.key}}}}, null, 2);
+  $("#newkey").classList.remove("hidden");
+  $("#newkey").innerHTML = `<div class="note" style="background:var(--accent-soft);color:var(--ink)">Copy this key now — it won’t be shown again.</div>
+    <pre class="box">${esc(r.key)}</pre>
+    <div class="section-label">Remote MCP (HTTP)</div><pre class="box">URL: https://&lt;your MCP server&gt;/mcp   (nous-drive mcp --http)\nHeader: Authorization: Bearer ${esc(r.key)}</pre>
+    <div class="section-label">Claude Desktop / Claude Code (stdio)</div><pre class="box">${esc(cfg)}</pre>`;
+  $("#keyname").value = ""; loadKeys();
+}
+async function loadKeys() {
+  const r = await api("/api/keys");
+  $("#keys").innerHTML = r.keys.filter(k => !k.revoked_at).map(k => `<tr><td>${esc(k.name)}</td><td>${k.kind === "session" ? "Claude / MCP" : k.kind}</td>
+    <td><code>${esc(k.key_prefix)}…</code></td><td>${ago(k.last_used_at)}</td>
+    <td style="text-align:right"><button class="btn danger sm" onclick="revokeKey('${k.id}')">Revoke</button></td></tr>`).join("")
+    || `<tr><td colspan="5" class="muted">No keys yet.</td></tr>`;
+  return false;
+}
+async function revokeKey(id) { if (await confirmModal("Revoke this key?", "Anything using it loses access immediately.", "Revoke")) { await api(`/api/keys/${id}`, {method: "DELETE"}); loadKeys(); } }
+
+/* ---------------------------------------------------------------- people */
 async function loadMembers() {
   const r = await api("/api/members");
-  $("#members").innerHTML = r.members.map(m => `<tr><td>${esc(m.email)}</td><td>${esc(m.name || "")}</td><td>${m.role}${m.deactivated_at ? ' <span class="pill error">off</span>' : ""}</td>
-    <td>${m.deactivated_at ? "" : `<button class="ghost" onclick="deactivateMember('${m.id}')">Remove</button>`}</td></tr>`).join("")
-    || `<tr><td colspan=4 class="muted">No people yet.</td></tr>`;
+  $("#members").innerHTML = r.members.map(m => `<tr><td>${esc(m.email)}</td><td>${esc(m.name || "")}</td>
+    <td>${m.role}${m.deactivated_at ? ' <span class="pill error">removed</span>' : ""}</td>
+    <td style="text-align:right">${m.deactivated_at ? "" : `<button class="btn danger sm" onclick="deactivateMember('${m.id}')">Remove</button>`}</td></tr>`).join("")
+    || `<tr><td colspan="4" class="muted">No people yet.</td></tr>`;
+  return false;
 }
 async function inviteMember() {
   const email = $("#invite-email").value.trim(); if (!email) return;
   $("#invite-msg").textContent = "Inviting…";
-  const r = await api("/api/members", {method:"POST", body: JSON.stringify({email, name: $("#invite-name").value || null, send_invite: true})});
+  const r = await api("/api/members", {method: "POST", body: JSON.stringify({email, name: $("#invite-name").value || null, send_invite: true})});
   $("#invite-msg").textContent = r.invite_sent ? `Invite sent to ${r.member.email}.` : `Added ${r.member.email}.`;
   if (r.dev_link) $("#invite-msg").textContent += " Dev link: " + r.dev_link;
   $("#invite-email").value = ""; $("#invite-name").value = ""; loadMembers();
 }
-async function deactivateMember(id) { if (confirm("Remove this person’s access?")) { await api(`/api/members/${id}`, {method:"DELETE"}); loadMembers(); } }
+async function deactivateMember(id) { if (await confirmModal("Remove this person’s access?", "They won’t be able to sign in any more.", "Remove")) { await api(`/api/members/${id}`, {method: "DELETE"}); loadMembers(); } }
 
-async function newKey() {
-  const r = await api("/api/keys", {method: "POST", body: JSON.stringify({name: $("#keyname").value || "MCP session", kind: "session"})});
-  $("#newkey").classList.remove("hidden"); $("#newkey").textContent = `${r.key}\n\n(${r.note})`; loadKeys();
+/* ---------------------------------------------------------------- modal helpers */
+function modal(html) {
+  $("#modal-root").innerHTML = `<div class="scrim" id="scrim"><div class="modal" role="dialog" aria-modal="true">${html}</div></div>`;
+  $("#scrim").onclick = (e) => { if (e.target.id === "scrim") closeModal(); };
 }
-async function loadKeys() {
-  const r = await api("/api/keys");
-  $("#keys").innerHTML = r.keys.map(k => `<tr><td>${esc(k.name)}</td><td>${k.kind}</td><td><code>${esc(k.key_prefix)}…</code></td><td>${when(k.last_used_at)}</td>
-    <td>${k.revoked_at ? '<span class="pill error">revoked</span>' : `<button class="ghost" onclick="revokeKey('${k.id}')">Revoke</button>`}</td></tr>`).join("");
+function closeModal() { $("#modal-root").innerHTML = ""; }
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeModal(); });
+function confirmModal(title, text, ok) {
+  return new Promise(res => {
+    modal(`<header><h2>${esc(title)}</h2><p>${esc(text)}</p></header><div class="body"></div>
+      <footer><span></span><div class="row"><button class="btn ghost" id="c-no">Cancel</button><button class="btn" id="c-yes">${esc(ok)}</button></div></footer>`);
+    $("#c-no").onclick = () => { closeModal(); res(false); }; $("#c-yes").onclick = () => { closeModal(); res(true); };
+  });
 }
-async function revokeKey(id) { if (confirm("Revoke this key?")) { await api(`/api/keys/${id}`, {method: "DELETE"}); loadKeys(); } }
-async function loadNotifs() {
-  const r = await api("/api/notifications");
-  $("#notifs").innerHTML = r.notifications.map(n => `<div style="border-bottom:1px solid var(--line);padding:8px 0"><b>${esc(n.title)}</b> <span class="pill ${n.kind === "alert" ? "error" : ""}">${n.kind}</span>
-    <span class="muted">${when(n.created_at)}</span><pre>${esc(n.body)}</pre></div>`).join("") || `<span class="muted">Nothing yet.</span>`;
+function promptModal(title, label, value) {
+  return new Promise(res => {
+    modal(`<header><h2>${esc(title)}</h2></header><div class="body"><input id="p-in" style="width:100%" placeholder="${esc(label)}" value="${esc(value)}"></div>
+      <footer><span></span><div class="row"><button class="btn ghost" id="p-no">Cancel</button><button class="btn" id="p-yes">Save</button></div></footer>`);
+    $("#p-in").focus(); $("#p-no").onclick = () => { closeModal(); res(null); };
+    $("#p-yes").onclick = () => { const v = $("#p-in").value.trim(); closeModal(); res(v || null); };
+  });
 }
-async function loadChanges() {
-  const r = await api("/api/changes?since=24h&limit=200");
-  $("#changes").innerHTML = r.changes.map(c => `<tr><td>${when(c.detected_at)}</td><td>${c.type}</td><td>${esc(c.path)}${c.from ? `<br><span class="muted">from ${esc(c.from)}</span>` : ""}</td><td>${esc(c.source)}${c.device ? ` · ${esc(c.device)}` : ""}</td></tr>`).join("");
-}
+
 route();
 </script>
 </body>

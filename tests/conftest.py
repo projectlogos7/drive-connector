@@ -54,7 +54,7 @@ def database():
     db.close_pool()
 
 
-TABLES = ["embeddings", "chunks", "summaries", "file_contents", "notifications", "audit_log", "mcp_checkpoints",
+TABLES = ["login_tokens", "members", "embeddings", "chunks", "summaries", "file_contents", "notifications", "audit_log", "mcp_checkpoints",
           "index_jobs", "change_events", "sync_cursors", "nodes", "credentials", "sources", "drive_connections",
           "pairing_codes", "devices", "api_keys", "accounts", "scheduler_state"]
 

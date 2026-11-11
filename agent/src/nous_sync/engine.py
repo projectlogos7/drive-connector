@@ -65,9 +65,31 @@ class SourceEngine:
             pending[e.rel] = pid
         return pid
 
-    def _delete(self, rec: Rec, reason: str | None = None) -> None:
+    def _delete(self, rec: Rec, reason: str | None = None, scan_id: str | None = None) -> None:
         self.state.delete(self.source_id, rec.rel, subtree=rec.kind == "folder")
-        self.state.enqueue(self.source_id, {"op": "delete", "provider_id": rec.provider_id, "reason": reason})
+        self.state.enqueue(self.source_id, {"op": "delete", "provider_id": rec.provider_id, "reason": reason,
+                                            "scan_id": scan_id}, scan_id)
+
+    def _same_object(self, old: Rec, e: Entry, fresh: dict[str, Entry] | None = None) -> bool:
+        """Is ``e`` really ``old`` moved/renamed? Inode numbers get reused after a delete, so a matching
+        fs id alone is not enough: a renamed file keeps its size and mtime; a moved folder keeps its children."""
+        if old.kind != e.kind or not e.fs_key or old.fs_key != e.fs_key:
+            return False
+        if e.kind == "file":
+            return old.size == e.size and old.mtime_ns == e.mtime_ns
+        if e.kind == "folder":
+            prefix = old.rel + "/"
+            old_children = {r.fs_key for rel, r in self.state.all(self.source_id).items()
+                            if rel.startswith(prefix) and "/" not in rel[len(prefix):] and r.fs_key}
+            if fresh is None:
+                fresh = scan(self.root, self.ignorer, under=e.rel)
+            new_prefix = e.rel + "/"
+            new_children = {x.fs_key for rel, x in fresh.items()
+                            if rel.startswith(new_prefix) and "/" not in rel[len(new_prefix):] and x.fs_key}
+            if not old_children and not new_children:
+                return True
+            return bool(old_children & new_children)
+        return True
 
     @staticmethod
     def _changed(rec: Rec, e: Entry) -> bool:
@@ -78,7 +100,7 @@ class SourceEngine:
         return rec.size != e.size or rec.mtime_ns != e.mtime_ns
 
     # ---------------------------------------------------------------- scans
-    def catch_up(self) -> dict:
+    def catch_up(self, scan_id: str | None = None) -> dict:
         """Diff a fresh scan against the stored snapshot and queue only the differences."""
         fresh = scan(self.root, self.ignorer)
         known = self.state.all(self.source_id)
@@ -92,12 +114,12 @@ class SourceEngine:
             for rel in sorted(added, key=_depth):
                 e = added[rel]
                 old = removed_by_key.get(e.fs_key) if e.fs_key else None
-                if old and old.kind == e.kind and old.rel in removed:
+                if old and old.rel in removed and self._same_object(old, e, fresh):
                     if e.kind == "folder":
                         self.state.move_subtree(self.source_id, old.rel, rel)
                     self.state.delete(self.source_id, old.rel)
                     del removed[old.rel]
-                    self._upsert(e, provider_id=old.provider_id, pending=pending)
+                    self._upsert(e, provider_id=old.provider_id, pending=pending, scan_id=scan_id)
                     stats["moved"] += 1
                     # Descendants moved along with the folder: they are now known under the new path.
                     if e.kind == "folder":
@@ -109,10 +131,11 @@ class SourceEngine:
                 e = fresh[rel]
                 rec = known.get(rel)
                 if rec is None:
-                    self._upsert(e, pending=pending)
+                    self._upsert(e, pending=pending, scan_id=scan_id)
                     stats["added"] += 1
                 elif self._changed(rec, e) or (rec.fs_key != e.fs_key and e.kind == "file"):
-                    self._upsert(e, provider_id=rec.provider_id if rec.kind == e.kind else None, pending=pending)
+                    self._upsert(e, provider_id=rec.provider_id if rec.kind == e.kind else None, pending=pending,
+                                 scan_id=scan_id)
                     stats["modified"] += 1
             # Deletes: only top-most removed paths (the server cascades to descendants).
             current = self.state.all(self.source_id)
@@ -122,13 +145,13 @@ class SourceEngine:
                 if _parent(r.rel) in gone_rels:
                     self.state.delete(self.source_id, r.rel, subtree=r.kind == "folder")
                     continue
-                self._delete(r)
+                self._delete(r, scan_id=scan_id)
                 stats["deleted"] += 1
         return stats
 
     def full_scan(self, scan_id: str) -> dict:
         """Report every entry under ``scan_id``; the server deletes what was not reported."""
-        stats = self.catch_up()
+        stats = self.catch_up(scan_id)
         fresh = self.state.all(self.source_id)
         with self.state:
             for rel in sorted(fresh, key=_depth):
@@ -166,7 +189,7 @@ class SourceEngine:
             if rec is None:
                 # A file that reappears under a new name with a known fs id was moved/renamed.
                 old = self.state.by_fs_key(self.source_id, e.fs_key) if e.fs_key else None
-                if old and old.kind == e.kind and stat_entry(self.root, old.rel) is None:
+                if old and stat_entry(self.root, old.rel) is None and self._same_object(old, e):
                     if e.kind == "folder":
                         self.state.move_subtree(self.source_id, old.rel, rel)
                     self.state.delete(self.source_id, old.rel)

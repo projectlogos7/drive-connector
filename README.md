@@ -59,14 +59,19 @@ the PRD, and [agent/README.md](agent/README.md) for the local agent.
    nous-drive mcp --http --port 8090      # or use stdio from the MCP client
    ```
 
-4. **Connect sources** in the web app at `<PUBLIC_BASE_URL>/app` (sign in with the admin key):
-   * *Connect Drive*: Google sign-in, then pick any mix of My Drive, folders and shared drives.
-   * *Devices*: create a pairing code, then on the computer:
+4. **Connect sources** in the web app at `<PUBLIC_BASE_URL>/app` (sign in with an emailed link, or an admin key).
+   The app has separate sections for **Google Drive**, **Computers**, **Activity**, **Claude access** and **People**.
+   * *Google Drive → Connect Google account*: after Google sign-in the **whole My Drive is added and indexing
+     starts immediately**; a dialog then lets you keep it or switch to specific folders (folder tree with
+     checkboxes) and add shared drives. "Choose what's watched" reopens it at any time. Once the first index
+     finishes, the account is watched continuously (push notifications, with polling every few minutes as a fallback).
+   * *Computers → Add a computer*: creates a pairing code and shows the install/pair commands, e.g.
      ```bash
      agent/installers/install.sh --code ABCD-EFGH --server https://drive.nous.example --name "Nous MacBook Pro"
      nous-sync add ~/Footage
      ```
-   The Sources page shows first-index progress (folders and files counted) and health.
+   Every source shows a live progress bar: Drive first counts items (metadata only, so there is a real total),
+   then shows "Indexing 4,522 of 11,840 — 38%", then "Up to date". Local scans report their totals the same way.
 
 ## Using it from Claude
 

@@ -227,6 +227,11 @@ def patch_settings(source_id: str, body: SettingsPatch, ident: dict = Depends(ad
 
 @app.delete("/api/sources/{source_id}")
 def delete_source(source_id: str, ident: dict = Depends(admin)) -> dict:
+    _delete_source(ident, source_id, revoke_if_last=True)
+    return {"deleted": source_id}
+
+
+def _delete_source(ident: dict, source_id: str, revoke_if_last: bool) -> None:
     with db.scoped(ident["account_id"]) as conn:
         src = accounts.get_source(conn, source_id)
         if not src:
@@ -243,11 +248,10 @@ def delete_source(source_id: str, ident: dict = Depends(admin)) -> dict:
                 make_client(ident["account_id"], src["connection_id"]).stop_channel(cur["channel_id"], cur["channel_resource_id"])
         except Exception as e:
             log.info("stop channel on delete failed: %s", e)
-        if last_on_connection:
+        if last_on_connection and revoke_if_last:
             revoke_remote(ident["account_id"], src["connection_id"])
     with db.scoped(ident["account_id"]) as conn:
         accounts.remove_source(conn, ident["account_id"], source_id, f"key:{ident['key_id']}")
-    return {"deleted": source_id}
 
 
 # ---- Google Drive connect flow
@@ -271,12 +275,35 @@ def google_callback(code: str | None = None, state: str | None = None, error: st
         raise HTTPException(400, f"bad OAuth state: {e}") from e
     tokens = exchange_code(code or "")
     conn_row = store_connection(st["a"], tokens, connection_id=st.get("conn"))
+    email = None
     try:
         about = make_client(st["a"], conn_row["id"]).about().get("user", {})
-        set_connection_identity(st["a"], conn_row["id"], about.get("emailAddress"), about.get("permissionId"))
+        email = about.get("emailAddress")
+        set_connection_identity(st["a"], conn_row["id"], email, about.get("permissionId"))
     except Exception as e:
         log.warning("could not read Drive identity: %s", e)
-    return RedirectResponse(f"/app#pick-roots={conn_row['id']}")
+    if not st.get("conn"):
+        try:
+            add_default_my_drive(st["a"], conn_row["id"], email)
+        except Exception as e:
+            log.warning("could not add My Drive by default: %s", e)
+    return RedirectResponse(f"/app#drive/connected={conn_row['id']}")
+
+
+def add_default_my_drive(account_id, connection_id, email: str | None = None) -> dict | None:
+    """A new Drive connection watches the whole My Drive by default and starts indexing at once.
+    The user can narrow it to folders (or add shared drives) afterwards."""
+    from ..connectors.gdrive.auth import make_client
+    root = make_client(account_id, connection_id).get_file("root", fields="id,name")
+    with db.scoped(account_id) as conn:
+        if conn.execute("SELECT 1 FROM drive_index.sources WHERE connection_id = %s", (str(connection_id),)).fetchone():
+            return None
+        others = conn.execute("SELECT count(*) AS n FROM drive_index.sources WHERE type = 'gdrive'").fetchone()["n"]
+        name = f"My Drive · {email}" if (others and email) else "My Drive"
+        src = accounts.create_source(conn, account_id, type_="gdrive", root_kind="my_drive", root_ref=root["id"],
+                                     name=name, connection_id=connection_id, actor="oauth")
+        queue.enqueue(conn, account_id, "drive_initial_crawl", src["id"], dedupe_key=f"crawl:{src['id']}")
+    return src
 
 
 @app.get("/api/connections")
@@ -312,6 +339,16 @@ def pick_roots(connection_id: str, parent: str | None = None, ident: dict = Depe
             "shared_drives": [{"kind": "shared_drive", "id": d["id"], "name": d["name"]} for d in drives]}
 
 
+@app.get("/api/connections/{connection_id}/selection")
+def get_selection(connection_id: str, ident: dict = Depends(admin)) -> dict:
+    with db.scoped(ident["account_id"]) as conn:
+        rows = conn.execute(
+            """SELECT id, root_kind, root_ref, name, status FROM drive_index.sources WHERE connection_id = %s
+               ORDER BY created_at""", (connection_id,)).fetchall()
+    return {"roots": [{"source_id": str(r["id"]), "kind": r["root_kind"], "id": r["root_ref"], "name": r["name"],
+                       "status": r["status"]} for r in rows]}
+
+
 class RootChoice(BaseModel):
     kind: str = Field(pattern="^(my_drive|folder|shared_drive)$")
     id: str
@@ -338,6 +375,26 @@ def create_drive_sources(connection_id: str, body: CreateSources, ident: dict = 
             queue.enqueue(conn, ident["account_id"], "drive_initial_crawl", src["id"], dedupe_key=f"crawl:{src['id']}")
             created.append({"id": str(src["id"]), "name": src["name"], "root_kind": src["root_kind"]})
     return {"created": created}
+
+
+@app.put("/api/connections/{connection_id}/selection")
+def set_selection(connection_id: str, body: CreateSources, ident: dict = Depends(admin)) -> dict:
+    """Make the watched roots of this Google account exactly ``roots``: add new ones (indexing starts
+    immediately) and stop watching the rest. Adds happen first so the connection is never left empty."""
+    if not body.roots:
+        raise HTTPException(400, "choose My Drive, at least one folder, or a shared drive")
+    wanted = {r.id: r for r in body.roots}
+    with db.scoped(ident["account_id"]) as conn:
+        current = {r["root_ref"]: r for r in conn.execute(
+            "SELECT id, root_ref, name FROM drive_index.sources WHERE connection_id = %s", (connection_id,))}
+    added = create_drive_sources(connection_id, CreateSources(
+        roots=[r for rid, r in wanted.items() if rid not in current], settings=body.settings), ident)["created"]
+    removed = []
+    for rid, row in current.items():
+        if rid not in wanted:
+            _delete_source(ident, str(row["id"]), revoke_if_last=False)
+            removed.append({"id": str(row["id"]), "name": row["name"]})
+    return {"added": added, "removed": removed}
 
 
 # ---- devices & keys
@@ -538,6 +595,7 @@ def agent_remove_source(source_id: str, ident: dict = Depends(device)) -> dict:
 class ScanBody(BaseModel):
     scan_id: str
     full: bool = False
+    total: int | None = None
     stats: dict[str, Any] | None = None
     snapshot_ref: str | None = None
 
@@ -545,7 +603,7 @@ class ScanBody(BaseModel):
 @app.post("/agent/sources/{source_id}/scan/begin")
 def agent_scan_begin(source_id: str, body: ScanBody, ident: dict = Depends(device)) -> dict:
     try:
-        ingest.begin_scan(ident["account_id"], ident["device_id"], source_id, body.scan_id, body.full)
+        ingest.begin_scan(ident["account_id"], ident["device_id"], source_id, body.scan_id, body.full, body.total)
     except ingest.IngestError as e:
         raise HTTPException(403, str(e)) from e
     return {"ok": True}

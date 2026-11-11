@@ -16,6 +16,7 @@ from typing import Any
 from .. import db, queue
 from ..accounts import audit, get_source, merged_settings, set_status
 from ..config import get_settings
+from ..progress import view as progress_view
 from ..util import escape_like, human_size, normalize_user_path, utcnow
 
 
@@ -232,6 +233,7 @@ def get_sync_status(ctx: Ctx, source: str | None = None) -> dict:
                 "dead_letters": [{**d, "finished_at": _ts(d["finished_at"])} for d in dead],
                 "last_full_scan_at": _ts(cur.get("last_full_scan_at")),
                 "scan_progress": cur.get("scan_progress") or {},
+                "progress": progress_view(src, cur, pending_crawl=jobs.get("pending", 0) + jobs.get("running", 0) > 0),
             }
             if src["type"] == "gdrive":
                 exp = cur.get("channel_expires_at")

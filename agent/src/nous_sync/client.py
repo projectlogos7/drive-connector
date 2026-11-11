@@ -61,8 +61,9 @@ class Client:
     def remove_source(self, source_id: str) -> dict:
         return self._req("DELETE", f"/agent/sources/{source_id}")
 
-    def begin_scan(self, source_id: str, scan_id: str, full: bool) -> dict:
-        return self._req("POST", f"/agent/sources/{source_id}/scan/begin", json={"scan_id": scan_id, "full": full})
+    def begin_scan(self, source_id: str, scan_id: str, full: bool, total: int | None = None) -> dict:
+        return self._req("POST", f"/agent/sources/{source_id}/scan/begin",
+                         json={"scan_id": scan_id, "full": full, "total": total})
 
     def send_events(self, source_id: str, events: list[dict], scan_id: str | None = None) -> dict:
         return self._req("POST", f"/agent/sources/{source_id}/events", json={"events": events, "scan_id": scan_id})

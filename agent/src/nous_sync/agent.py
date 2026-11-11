@@ -56,8 +56,10 @@ class SourceRunner:
         """Catch-up (diff) scan, or a full rescan when the server asks for one / on first run."""
         with self.lock:
             scan_id = uuid.uuid4().hex
-            self.agent.client.begin_scan(self.conf.id, scan_id, full)
-            stats = self.engine.full_scan(scan_id) if full else self.engine.catch_up()
+            before = self.agent.state.pending(self.conf.id)
+            stats = self.engine.full_scan(scan_id) if full else self.engine.catch_up(scan_id)
+            total = self.agent.state.pending(self.conf.id) - before
+            self.agent.client.begin_scan(self.conf.id, scan_id, full, total)
             self.agent.flush(self.conf.id)
             self.agent.client.complete_scan(self.conf.id, scan_id, full, stats)
             self.agent.state.meta(f"scanned:{self.conf.id}", scan_id)

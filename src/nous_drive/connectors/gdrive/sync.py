@@ -113,7 +113,8 @@ class DriveSync:
                 "start_token": self.client.start_page_token(self.drive_id),
                 "mode": "bfs" if self.source["root_kind"] == "folder" else "flat",
                 "frontier": [self.source["root_ref"]], "batch": None, "page_token": None,
-                "folders": 0, "files": 0, "started_at": utcnow().isoformat(),
+                "folders": 0, "files": 0, "total": None, "counted": 0, "phase": "starting",
+                "started_at": utcnow().isoformat(),
             }
             if not reconcile:
                 self._status("initial_scan", "first full index in progress")
@@ -121,14 +122,21 @@ class DriveSync:
         scan_id = progress["scan_id"]
         self._ensure_roots(scan_id)
 
+        if progress.get("total") is None:
+            progress["phase"] = "counting"
+            progress["total"] = self._count_total(progress)
+        progress["phase"] = "listing"
         if progress["mode"] == "flat":
             self._crawl_flat(progress)
         else:
             self._crawl_bfs(progress)
 
         # Replay changes that happened while we were listing, tagged as seen in this scan.
+        progress["phase"] = "catching_up"
+        self._apply([], cursor={"scan_progress": progress})
         token = self._drain_changes(progress["start_token"], scan_id=scan_id)
-        progress.update(state="done", finished_at=utcnow().isoformat(), frontier=[], batch=None, page_token=None)
+        progress.update(state="done", phase="done", finished_at=utcnow().isoformat(), frontier=[], batch=None,
+                        page_token=None)
         self._apply([], rebuild=True, finish_scan=scan_id, scan_started_at=progress["started_at"], cursor={
             "drive_page_token": token, "last_full_scan_at": utcnow(), "scan_progress": progress,
             "current_scan_id": None, "last_poll_at": utcnow(),
@@ -139,6 +147,28 @@ class DriveSync:
         except Exception as e:  # push is an optimisation; polling covers it
             log.warning("could not open push channel for %s: %s", self.source_id, e)
         return progress
+
+    def _count_total(self, progress: dict) -> int:
+        """Cheap metadata-only pre-count (ids only, 1000 per request) so progress can show a real percentage."""
+        n = 0
+        light = "id,mimeType,driveId"
+        if progress["mode"] == "flat":
+            corpora = None if self.drive_id else "user"
+            for files in self.client.iter_files(drive_id=self.drive_id, corpora=corpora, fields=light, page_size=1000):
+                n += sum(1 for f in files if self._in_flat_scope(f))
+                progress["counted"] = n
+                self._apply([], cursor={"scan_progress": progress})
+            return n
+        frontier = [self.source["root_ref"]]
+        while frontier:
+            batch, frontier = frontier[:BFS_BATCH], frontier[BFS_BATCH:]
+            q = " or ".join(f"'{fid}' in parents" for fid in batch)
+            for files in self.client.iter_files(q=q, corpora="allDrives", fields=light, page_size=1000):
+                n += len(files)
+                frontier += [f["id"] for f in files if f.get("mimeType") == FOLDER_MIME]
+                progress["counted"] = n
+                self._apply([], cursor={"scan_progress": progress})
+        return n
 
     def _count(self, progress: dict, files: list[dict]) -> None:
         for f in files:

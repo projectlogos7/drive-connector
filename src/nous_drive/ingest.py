@@ -59,14 +59,14 @@ def submit_events(account_id, device_id, source_id, events: list[dict[str, Any]]
     return n
 
 
-def begin_scan(account_id, device_id, source_id, scan_id: str, full: bool) -> None:
+def begin_scan(account_id, device_id, source_id, scan_id: str, full: bool, total: int | None = None) -> None:
     with db.scoped(account_id) as conn:
         _device_source(conn, device_id, source_id)
         conn.execute(
             """UPDATE drive_index.sync_cursors SET current_scan_id = %s,
                  scan_progress = %s WHERE source_id = %s""",
-            (scan_id, Jsonb({"state": "running", "scan_id": scan_id, "full": full,
-                             "started_at": db_now(conn)}), str(source_id)),
+            (scan_id, Jsonb({"state": "running", "scan_id": scan_id, "full": full, "phase": "listing",
+                             "total": total, "processed": 0, "started_at": db_now(conn)}), str(source_id)),
         )
         conn.execute("UPDATE drive_index.sources SET pending_command = NULL WHERE id = %s",
                      (str(source_id),))
@@ -165,6 +165,13 @@ def apply_job(job: dict) -> dict:
         if job["kind"] == "apply_events":
             events = [NodeEvent.model_validate(e) for e in p["events"]]
             ix.apply(events)
+            scan_ids = {e.scan_id for e in events if e.scan_id}
+            if scan_ids:
+                conn.execute(
+                    """UPDATE drive_index.sync_cursors SET scan_progress = jsonb_set(scan_progress, '{processed}',
+                         to_jsonb(coalesce((scan_progress->>'processed')::int, 0) + %s))
+                       WHERE source_id = %s AND current_scan_id = ANY(%s)""",
+                    (len(events), job["source_id"], list(scan_ids)))
             return {"applied": ix.stats.applied, "changes": ix.stats.changes}
         # finish_scan
         swept = 0
@@ -176,7 +183,8 @@ def apply_job(job: dict) -> dict:
                  ELSE last_full_scan_at END, local_snapshot_ref = coalesce(%s, local_snapshot_ref),
                  scan_progress = scan_progress || %s WHERE source_id = %s""",
             (bool(p.get("full")), p.get("snapshot_ref"),
-             Jsonb({"state": "done", "finished_at": db_now(conn), **(p.get("stats") or {})}), job["source_id"]),
+             Jsonb({"state": "done", "phase": "done", "finished_at": db_now(conn), **(p.get("stats") or {})}),
+             job["source_id"]),
         )
         if src["status"] in ("connecting", "initial_scan") or (src["status"] == "degraded"):
             set_status(conn, src["id"], "live")

@@ -657,6 +657,58 @@ def list_keys(ident: dict = Depends(admin)) -> dict:
     return {"keys": rows}
 
 
+def _mcp_url() -> str:
+    s = get_settings()
+    if s.mcp_public_url:
+        return s.mcp_public_url.rstrip("/")
+    return s.public_base_url.rstrip("/") + "/mcp"
+
+
+def _mcp_server_status(url: str) -> str:
+    """Best-effort reachability probe. ``up`` / ``down`` / ``unknown``."""
+    import urllib.error
+    import urllib.request
+
+    try:
+        req = urllib.request.Request(url, method="GET", headers={"Accept": "application/json"})
+        with urllib.request.urlopen(req, timeout=2.5) as resp:  # noqa: S310 — operator-configured URL
+            resp.read(64)
+        return "up"
+    except urllib.error.HTTPError as e:
+        # Auth-required or protocol handshake responses still mean the process is listening.
+        if e.code in (401, 403, 405, 406, 415):
+            return "up"
+        return "down"
+    except Exception:
+        return "down" if url.startswith(("http://", "https://")) else "unknown"
+
+
+@app.get("/api/mcp")
+def mcp_status(ident: dict = Depends(admin)) -> dict:
+    """MCP endpoint URL, server reachability, and per-key connection state for the setup page."""
+    url = _mcp_url()
+    with db.scoped(ident["account_id"]) as conn:
+        rows = conn.execute(
+            """SELECT id, kind, name, key_prefix, created_at, last_used_at, revoked_at,
+                      CASE
+                        WHEN revoked_at IS NOT NULL THEN 'revoked'
+                        WHEN last_used_at IS NULL THEN 'never'
+                        WHEN last_used_at > now() - interval '15 minutes' THEN 'connected'
+                        ELSE 'idle'
+                      END AS connection
+               FROM drive_index.api_keys
+               WHERE kind IN ('session', 'admin')
+               ORDER BY created_at"""
+        ).fetchall()
+    active = [r for r in rows if r["connection"] == "connected"]
+    return {
+        "mcp_url": url,
+        "server": _mcp_server_status(url),
+        "connected": len(active) > 0,
+        "keys": rows,
+    }
+
+
 @app.delete("/api/keys/{key_id}")
 def revoke_key(key_id: str, ident: dict = Depends(admin)) -> dict:
     with db.scoped(ident["account_id"]) as conn:

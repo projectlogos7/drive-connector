@@ -141,6 +141,12 @@ def test_web_api_keys_settings_and_delete(api, account):
     key = api.post("/api/keys", json={"name": "Claude Desktop"}, headers=H(k)).json()["key"]
     assert api.get("/api/sources", headers=H(key)).status_code == 200      # session keys can read
     assert api.post("/api/keys", json={"name": "x"}, headers=H(key)).status_code == 401  # but not administer
+    mcp = api.get("/api/mcp", headers=H(k)).json()
+    assert mcp["mcp_url"].endswith("/mcp")
+    assert mcp["server"] in ("up", "down", "unknown")
+    assert mcp["connected"] is False
+    assert any(row["name"] == "Claude Desktop" and row["connection"] == "never" for row in mcp["keys"])
+    assert api.get("/api/mcp", headers=H(key)).status_code == 401  # session keys cannot administer
     from .conftest import make_source
     src = make_source(account["id"])
     r = api.patch(f"/api/sources/{src['id']}/settings", json={"notifications": {"types": ["added", "moved"]}},

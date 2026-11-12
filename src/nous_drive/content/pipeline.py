@@ -40,6 +40,8 @@ def store_text(account_id, node_id: str, text: str, extractor: str, expected_has
     """Persist extracted text and its chunks, then queue a ``content_embed`` job for embeddings + summary."""
     from .. import queue
     s = get_settings()
+    # PDF/binary extractors can emit NUL bytes; Postgres text columns reject them.
+    text = (text or "").replace("\x00", "")
     truncated = len(text) > s.content_max_chars
     text = text[: s.content_max_chars]
     chunks = chunk_text(text)

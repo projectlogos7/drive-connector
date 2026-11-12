@@ -102,6 +102,9 @@ class Settings:
 
     # MCP
     mcp_page_limit: int = field(default_factory=lambda: _int("MCP_PAGE_LIMIT", 200))
+    # Public URL of the streamable-HTTP MCP endpoint (…/mcp). Empty → PUBLIC_BASE_URL + /mcp
+    # (works when a reverse proxy mounts the MCP service on the same host).
+    mcp_public_url: str | None = field(default_factory=lambda: _env("MCP_PUBLIC_URL"))
 
 
 @lru_cache(maxsize=1)

@@ -15,7 +15,7 @@ const NAV = [
   { href: "/drive/", label: "Google Drive", icon: HardDrive, count: "gdrive" },
   { href: "/computers/", label: "Computers", icon: Monitor, count: "local" },
   { href: "/activity/", label: "Activity", icon: Activity },
-  { href: "/claude/", label: "Claude access", icon: KeyRound },
+  { href: "/claude/", label: "MCP", icon: KeyRound },
   { href: "/people/", label: "People", icon: Users },
 ] as const;
 
